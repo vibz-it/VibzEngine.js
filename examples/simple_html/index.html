@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibzEngine Test Page</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            background: #333;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #444;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-connect {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-disconnect {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-action {
+            background: #2196F3;
+            color: white;
+        }
+
+        #logArea {
+            width: 100%;
+            height: 300px;
+            background: #222;
+            color: #0f0;
+            font-family: monospace;
+            overflow-y: scroll;
+            padding: 10px;
+            box-sizing: border-box;
+            margin-top: 20px;
+            border: 1px solid #555;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #666;
+            border-radius: 4px;
+        }
+
+        input[type="number"],
+        select {
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+        }
+
+        label {
+            display: inline-block;
+            width: 80px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>VibzEngine Tester</h1>
+
+        <div class="control-group">
+            <h3>Connection</h3>
+            <button id="connectBtn" class="btn-connect">Connect via USB</button>
+            <button id="disconnectBtn" class="btn-disconnect" disabled>Disconnect</button>
+            <span id="status">Disconnected</span>
+        </div>
+
+        <div class="control-group">
+            <h3>Event Controls</h3>
+            <div>
+                <label>Style:</label>
+                <select id="styleSelect">
+                    <option value="0">On (0)</option>
+                    <option value="1">Off (1)</option>
+                    <option value="2">Strobe (2)</option>
+                    <option value="3">Wave (3)</option>
+                    <option value="7">Pulse (7)</option>
+                    <option value="8">Random (8)</option>
+                </select>
+            </div>
+            <div>
+                <label>Color (R):</label> <input type="number" id="colorR" value="255" min="0" max="255">
+                <label>Color (G):</label> <input type="number" id="colorG" value="0" min="0" max="255">
+                <label>Color (B):</label> <input type="number" id="colorB" value="0" min="0" max="255">
+            </div>
+            <div>
+                <label>Vibrate:</label> <input type="number" id="colorVib" value="0" min="0" max="255">
+            </div>
+            <div>
+                <label>Frequency:</label> <input type="number" id="frequency" value="0" min="0" max="255"
+                    title="0-255 (Hz)">
+            </div>
+            <div>
+                <label>Duration:</label> <input type="number" id="duration" value="0" min="0" max="255">
+            </div>
+
+            <h4>Layer Config</h4>
+            <div>
+                <label>Layer Nbr:</label> <input type="number" id="layerNbr" value="0" min="0" max="3">
+                <label>Opacity:</label> <input type="number" id="layerOpacity" value="255" min="0" max="255">
+            </div>
+            <div>
+                <label>Blending:</label>
+                <select id="layerBlending">
+                    <option value="0">Normal (0)</option>
+                    <option value="1">Add (1)</option>
+                    <option value="2">And (2)</option>
+                    <option value="3">Subtract (3)</option>
+                    <option value="4">Multiply (4)</option>
+                    <option value="5">Divide (5)</option>
+                </select>
+            </div>
+            <br>
+            <button id="sendEventBtn" class="btn-action" disabled>Send Event</button>
+            <button id="stopEventBtn" class="btn-action" disabled>Stop Event</button>
+        </div>
+
+        <div class="control-group">
+            <h3>Logs</h3>
+            <button id="clearLogBtn">Clear Logs</button>
+            <div id="logArea"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { VibzController, Event, Styles, logger } from '../../index.js';
+
+        const controller = new VibzController();
+        const logArea = document.getElementById('logArea');
+        const statusSpan = document.getElementById('status');
+
+        // --- Logging Setup ---
+        logger.setLevel(0); // DEBUG
+        logger.setCustomOutput((msg, level) => {
+            const div = document.createElement('div');
+            const time = new Date().toISOString().split('T')[1].slice(0, -1);
+            div.textContent = `[${time}] ${msg}`;
+            div.style.color = level === 'ERROR' ? '#ff5555' : (level === 'WARN' ? '#ffaa00' : '#0f0');
+            logArea.appendChild(div);
+            logArea.scrollTop = logArea.scrollHeight;
+        });
+
+        // --- UI Logic ---
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const sendEventBtn = document.getElementById('sendEventBtn');
+        const stopEventBtn = document.getElementById('stopEventBtn');
+
+        // Handle physical disconnection
+        controller.setOnDisconnect(() => {
+            statusSpan.textContent = "Disconnected (Device lost)";
+            statusSpan.style.color = 'red';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            sendEventBtn.disabled = true;
+            stopEventBtn.disabled = true;
+            logger.warn("Device disconnected unexpectedly.");
+        });
+
+        connectBtn.addEventListener('click', async () => {
+            const success = await controller.connect();
+            if (success) {
+                statusSpan.textContent = "Connected";
+                statusSpan.style.color = '#0f0';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendEventBtn.disabled = false;
+                stopEventBtn.disabled = false;
+            } else {
+                statusSpan.textContent = "Connection Failed";
+                statusSpan.style.color = 'red';
+            }
+        });
+
+        disconnectBtn.addEventListener('click', async () => {
+            await controller.disconnect();
+            statusSpan.textContent = "Disconnected";
+            statusSpan.style.color = 'white';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            sendEventBtn.disabled = true;
+            stopEventBtn.disabled = true;
+        });
+
+        const TEST_EVENT_ID = "test_event_1";
+
+        sendEventBtn.addEventListener('click', () => {
+            // Create Event
+            const evt = new Event();
+            evt.id = 1;
+            evt.mask = 0; // Broadcast?
+
+            // Configure Effect
+            evt.effect.style = parseInt(document.getElementById('styleSelect').value);
+            evt.effect.frequency = parseInt(document.getElementById('frequency').value);
+            evt.effect.intensity = 255;
+            evt.effect.duration = parseInt(document.getElementById('duration').value);
+            evt.effect.color[0] = parseInt(document.getElementById('colorR').value);
+            evt.effect.color[1] = parseInt(document.getElementById('colorG').value);
+            evt.effect.color[2] = parseInt(document.getElementById('colorB').value);
+            evt.effect.color[4] = parseInt(document.getElementById('colorVib').value);
+
+            // Configure Layer
+            evt.layer.nbr = parseInt(document.getElementById('layerNbr').value);
+            evt.layer.opacity = parseInt(document.getElementById('layerOpacity').value);
+            evt.layer.blendingMode = parseInt(document.getElementById('layerBlending').value);
+
+            console.log("Play Event", evt);
+            controller.playEvent(TEST_EVENT_ID, evt);
+            logger.info("Event sent!");
+        });
+
+        stopEventBtn.addEventListener('click', async () => {
+            await controller.stopEvent(TEST_EVENT_ID);
+        });
+
+        document.getElementById('clearLogBtn').addEventListener('click', () => {
+            logArea.innerHTML = '';
+        });
+
+    </script>
+</body>
+
+</html>
