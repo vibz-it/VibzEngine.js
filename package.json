@@ -1,0 +1,65 @@
+{
+  "name": "vibz-engine",
+  "version": "0.1.0",
+  "description": "Control Vibz light-up wristbands from the browser via Web Serial",
+  "type": "module",
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./react": {
+      "import": {
+        "types": "./react-dist/index.d.ts",
+        "default": "./react-dist/index.js"
+      },
+      "require": {
+        "types": "./react-dist/index.d.cts",
+        "default": "./react-dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "react-dist",
+    "index.js",
+    "index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsup --watch",
+    "clean": "rimraf react-dist"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "react": "^18.3.0",
+    "rimraf": "^6.0.1",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "vibz",
+    "wristband",
+    "web-serial",
+    "usb",
+    "react"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibz-it/VibzEngine.js"
+  },
+  "license": "MIT"
+}

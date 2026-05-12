@@ -114,17 +114,70 @@ function stopLight() {
 See `examples/simple_html/index.html` for a complete example.
 Ensure your server serves the files with correct MIME types for `.js` modules.
 
-### Integration in Framer / React
-1. Copy the `src` folder and `index.js` into your project (e.g., `src/vibz-engine`).
-2. Import `VibzController` in your React component.
-3. Use `useEffect` to handle cleanup on unmount:
-   ```javascript
-   useEffect(() => {
-       return () => {
-           controller.disconnect();
-       };
-   }, []);
-   ```
+### React bindings (`vibz-engine/react`)
+
+The package ships a headless React layer. The library owns *behavior*
+(connection, frame send/stop, pointer + keyboard handling); your app owns
+*rendering* (JSX, CSS, classNames). Three primitives:
+
+- `VibzProvider` — owns a single `VibzController` and exposes it via context.
+- `useVibz()` — returns `{ status, error, connect, disconnect, controller }`.
+- `useVibzButton()` / `<VibzButton>` — press-to-light behavior with multi-input
+  tracking. Returns `ref`, `handlers`, `state` (pressed, hovering, focused,
+  connected, disabled). Multi-source aware: holding mouse AND space won't
+  double-stop on release of either alone.
+
+```tsx
+import {
+  VibzProvider, useVibz, VibzButton, Styles,
+} from 'vibz-engine/react';
+
+function App() {
+  return (
+    <VibzProvider>
+      <ConnectButton />
+      <PulseButton />
+    </VibzProvider>
+  );
+}
+
+function ConnectButton() {
+  const { status, connect, disconnect } = useVibz();
+  return (
+    <button onClick={status === 'connected' ? disconnect : connect}>
+      {status === 'connected' ? 'Disconnect' : 'Connect Vibz'}
+    </button>
+  );
+}
+
+function PulseButton() {
+  return (
+    <VibzButton event={{
+      effect: { style: Styles.Pulse, color: [255, 49, 75], frequency: 2 },
+    }}>
+      {({ ref, handlers, state }) => (
+        <button
+          ref={ref}
+          {...handlers}
+          disabled={!state.connected}
+          className={state.pressed ? 'glow' : ''}
+        >
+          {state.connected ? 'Hold to pulse' : 'Connect first'}
+        </button>
+      )}
+    </VibzButton>
+  );
+}
+```
+
+Status values: `'unsupported' | 'idle' | 'connecting' | 'connected' |
+'disconnecting' | 'error'`.
+
+#### Vanilla import (no React)
+
+```javascript
+import { VibzController, Event, Styles } from 'vibz-engine';
+```
 
 ## Configuration
 You can adjust timeouts and intervals in `src/config/Config.js`.

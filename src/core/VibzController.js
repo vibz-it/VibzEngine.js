@@ -88,6 +88,12 @@ export class VibzController {
                 const payload = event.encode();
                 const frame = Protocol.frameMessage(payload);
                 await this.transport.write(frame);
+                let hex = '';
+                for (let i = 0; i < frame.length; i++) {
+                    if (i > 0) hex += ' ';
+                    hex += frame[i].toString(16).padStart(2, '0').toUpperCase();
+                }
+                logger.debug(`Event ${id} STOP → ${frame.length}B  frame=[${hex}]`);
             } catch (e) {
                 logger.error(`Failed to send stop signal for event ${id}`, e);
             }

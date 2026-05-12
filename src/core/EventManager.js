@@ -7,6 +7,15 @@ import { Config } from '../config/Config.js';
 import { Protocol } from '../protocol/Protocol.js';
 import { logger } from '../utils/Logger.js';
 
+function formatHex(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) {
+        if (i > 0) s += ' ';
+        s += bytes[i].toString(16).padStart(2, '0').toUpperCase();
+    }
+    return s;
+}
+
 export class EventManager {
     constructor(transport, timeManager) {
         this.transport = transport; // SerialTransport instance
@@ -136,7 +145,9 @@ export class EventManager {
                 await this.transport.write(frame);
 
                 eventData.lastRefreshTime = now;
-                // logger.debug(`Refreshed event ${id}`);
+                logger.debug(
+                    `Event ${id} → ${frame.length}B  payload=[${formatHex(payload)}]  frame=[${formatHex(frame)}]`
+                );
             }
         }
     }
