@@ -7,27 +7,91 @@
     <title>VibzEngine Test Page</title>
     <style>
         body {
-            font-family: sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             padding: 20px;
-            background: #333;
-            color: #fff;
+            background: #222;
+            color: #eee;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
-            background: #444;
-            padding: 20px;
-            border-radius: 8px;
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
         }
 
+        /* Panels */
+        .panel {
+            background: #333;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin-top: 0;
+            color: #fff;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        /* Controls */
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+
+        input[type="number"],
+        select,
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #444;
+            color: #fff;
+            box-sizing: border-box;
+        }
+
+        input[type="range"] {
+            width: 100%;
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .col {
+            flex: 1;
+        }
+
+        /* Buttons */
         button {
-            padding: 10px 20px;
-            margin: 5px;
+            width: 100%;
+            padding: 10px;
+            margin-top: 5px;
             cursor: pointer;
             border: none;
             border-radius: 4px;
             font-weight: bold;
+            transition: background 0.2s;
         }
 
         button:disabled {
@@ -45,61 +109,120 @@
             color: white;
         }
 
-        .btn-action {
+        .btn-primary {
             background: #2196F3;
             color: white;
         }
 
+        .btn-danger {
+            background: #ff5555;
+            color: white;
+        }
+
+        .btn-update {
+            background: #ff9800;
+            color: white;
+        }
+
+        /* Active Events List */
+        #eventList {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .event-card {
+            background: #444;
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            border-left: 5px solid #aaa;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+
+        .event-card.active {
+            border-left-color: #0f0;
+        }
+
+        .event-card.editing {
+            background: #555;
+            border-left-color: #2196F3;
+            box-shadow: 0 0 10px rgba(33, 150, 243, 0.3);
+        }
+
+        .event-info {
+            font-size: 0.9em;
+        }
+
+        .event-actions button {
+            width: auto;
+            padding: 5px 10px;
+            font-size: 0.8em;
+        }
+
+        /* Logs */
         #logArea {
-            width: 100%;
-            height: 300px;
-            background: #222;
+            height: 200px;
+            background: #111;
             color: #0f0;
             font-family: monospace;
-            overflow-y: scroll;
+            overflow-y: auto;
             padding: 10px;
-            box-sizing: border-box;
-            margin-top: 20px;
-            border: 1px solid #555;
-        }
-
-        .control-group {
-            margin-bottom: 20px;
-            padding: 10px;
-            border: 1px solid #666;
             border-radius: 4px;
+            font-size: 0.85em;
         }
 
-        input[type="number"],
-        select {
-            padding: 5px;
-            border-radius: 3px;
-            border: 1px solid #ccc;
+        .log-entry {
+            margin-bottom: 2px;
+            border-bottom: 1px solid #222;
         }
 
-        label {
-            display: inline-block;
-            width: 80px;
+        /* Status */
+        #status {
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .color-preview {
+            height: 5px;
+            margin-top: 5px;
+            border-radius: 2px;
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <h1>VibzEngine Tester</h1>
+    <h1>VibzEngine Tester</h1>
 
-        <div class="control-group">
-            <h3>Connection</h3>
-            <button id="connectBtn" class="btn-connect">Connect via USB</button>
-            <button id="disconnectBtn" class="btn-disconnect" disabled>Disconnect</button>
-            <span id="status">Disconnected</span>
+    <div class="container">
+        <!-- Connection & Global Status -->
+        <div class="panel full-width">
+            <div class="row" style="align-items: center;">
+                <button id="connectBtn" class="btn-connect" style="width: auto;">Connect USB</button>
+                <button id="disconnectBtn" class="btn-disconnect" style="width: auto;" disabled>Disconnect</button>
+                <span id="status">Disconnected</span>
+                <div style="flex-grow: 1;"></div>
+                <button id="clearLogBtn" style="width: auto; background: #666;">Clear Logs</button>
+            </div>
         </div>
 
-        <div class="control-group">
-            <h3>Event Controls</h3>
-            <div>
-                <label>Style:</label>
-                <select id="styleSelect">
+        <!-- Editor Panel -->
+        <div class="panel">
+            <h3>Event Editor <span id="editingIndicator"
+                    style="font-size: 0.6em; color: #2196F3; display: none;">(Editing Live)</span></h3>
+
+            <div class="control-group">
+                <label>Event ID (Auto-generated if empty)</label>
+                <input type="text" id="eventId" placeholder="e.g. event_1">
+            </div>
+
+            <div class="control-group">
+                <label>Style</label>
+                <select id="styleSelect" class="live-input">
                     <option value="0">On (0)</option>
                     <option value="1">Off (1)</option>
                     <option value="2">Strobe (2)</option>
@@ -108,30 +231,59 @@
                     <option value="8">Random (8)</option>
                 </select>
             </div>
-            <div>
-                <label>Color (R):</label> <input type="number" id="colorR" value="255" min="0" max="255">
-                <label>Color (G):</label> <input type="number" id="colorG" value="0" min="0" max="255">
-                <label>Color (B):</label> <input type="number" id="colorB" value="0" min="0" max="255">
+
+            <div class="row control-group">
+                <div class="col">
+                    <label>R</label>
+                    <input type="number" id="colorR" value="255" min="0" max="255" class="live-input">
+                </div>
+                <div class="col">
+                    <label>G</label>
+                    <input type="number" id="colorG" value="0" min="0" max="255" class="live-input">
+                </div>
+                <div class="col">
+                    <label>B</label>
+                    <input type="number" id="colorB" value="0" min="0" max="255" class="live-input">
+                </div>
+                <div class="col">
+                    <label>W</label>
+                    <input type="number" id="colorW" value="0" min="0" max="255" class="live-input">
+                </div>
             </div>
-            <div>
-                <label>Vibrate:</label> <input type="number" id="colorVib" value="0" min="0" max="255">
-            </div>
-            <div>
-                <label>Frequency:</label> <input type="number" id="frequency" value="0" min="0" max="255"
-                    title="0-255 (Hz)">
-            </div>
-            <div>
-                <label>Duration:</label> <input type="number" id="duration" value="0" min="0" max="255">
+            <div class="control-group">
+                <div id="colorPreview" class="color-preview" style="background: rgb(255,0,0);"></div>
             </div>
 
-            <h4>Layer Config</h4>
-            <div>
-                <label>Layer Nbr:</label> <input type="number" id="layerNbr" value="0" min="0" max="3">
-                <label>Opacity:</label> <input type="number" id="layerOpacity" value="255" min="0" max="255">
+            <div class="row control-group">
+                <div class="col">
+                    <label>Vibration</label>
+                    <input type="number" id="colorVib" value="0" min="0" max="255" class="live-input">
+                </div>
+                <div class="col">
+                    <label>Duration (0=Inf)</label>
+                    <input type="number" id="duration" value="0" min="0" max="255" class="live-input">
+                </div>
             </div>
-            <div>
-                <label>Blending:</label>
-                <select id="layerBlending">
+
+            <div class="control-group">
+                <label>Frequency (Hz)</label>
+                <input type="number" id="frequency" value="0" min="0" max="255" class="live-input">
+            </div>
+
+            <div class="row control-group">
+                <div class="col">
+                    <label>Layer</label>
+                    <input type="number" id="layerNbr" value="0" min="0" max="3" class="live-input">
+                </div>
+                <div class="col">
+                    <label>Opacity</label>
+                    <input type="number" id="layerOpacity" value="255" min="0" max="255" class="live-input">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Blending</label>
+                <select id="layerBlending" class="live-input">
                     <option value="0">Normal (0)</option>
                     <option value="1">Add (1)</option>
                     <option value="2">And (2)</option>
@@ -140,14 +292,25 @@
                     <option value="5">Divide (5)</option>
                 </select>
             </div>
-            <br>
-            <button id="sendEventBtn" class="btn-action" disabled>Send Event</button>
-            <button id="stopEventBtn" class="btn-action" disabled>Stop Event</button>
+
+            <button id="sendEventBtn" class="btn-primary" disabled>🚀 Send / Create New</button>
+            <p style="font-size: 0.8em; color: #888; text-align: center;">
+                Select an event to edit live. Clicking Send creates a NEW event if ID is changed.
+            </p>
         </div>
 
-        <div class="control-group">
+        <!-- Active Events Panel -->
+        <div class="panel">
+            <h3>Active Events</h3>
+            <div id="emptyListMsg" style="color: #666; font-style: italic;">No active events</div>
+            <ul id="eventList">
+                <!-- Event Cards will go here -->
+            </ul>
+        </div>
+
+        <!-- Logs Panel -->
+        <div class="panel full-width">
             <h3>Logs</h3>
-            <button id="clearLogBtn">Clear Logs</button>
             <div id="logArea"></div>
         </div>
     </div>
@@ -158,11 +321,25 @@
         const controller = new VibzController();
         const logArea = document.getElementById('logArea');
         const statusSpan = document.getElementById('status');
+        const eventList = document.getElementById('eventList');
+        const emptyListMsg = document.getElementById('emptyListMsg');
 
-        // --- Logging Setup ---
-        logger.setLevel(0); // DEBUG
+        // Color Preview Logic
+        function updateColorPreview() {
+            const r = document.getElementById('colorR').value;
+            const g = document.getElementById('colorG').value;
+            const b = document.getElementById('colorB').value;
+            document.getElementById('colorPreview').style.background = `rgb(${r},${g},${b})`;
+        }
+        ['colorR', 'colorG', 'colorB', 'colorW'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateColorPreview);
+        });
+
+        // --- Logging ---
+        logger.setLevel(0);
         logger.setCustomOutput((msg, level) => {
             const div = document.createElement('div');
+            div.className = 'log-entry';
             const time = new Date().toISOString().split('T')[1].slice(0, -1);
             div.textContent = `[${time}] ${msg}`;
             div.style.color = level === 'ERROR' ? '#ff5555' : (level === 'WARN' ? '#ffaa00' : '#0f0');
@@ -170,57 +347,162 @@
             logArea.scrollTop = logArea.scrollHeight;
         });
 
-        // --- UI Logic ---
+        // --- Connection ---
         const connectBtn = document.getElementById('connectBtn');
         const disconnectBtn = document.getElementById('disconnectBtn');
         const sendEventBtn = document.getElementById('sendEventBtn');
-        const stopEventBtn = document.getElementById('stopEventBtn');
 
-        // Handle physical disconnection
+        function setConnectedState(isConnected) {
+            connectBtn.disabled = isConnected;
+            disconnectBtn.disabled = !isConnected;
+            sendEventBtn.disabled = !isConnected;
+
+            statusSpan.textContent = isConnected ? "Connected" : "Disconnected";
+            statusSpan.style.color = isConnected ? '#4CAF50' : '#f44336';
+        }
+
         controller.setOnDisconnect(() => {
-            statusSpan.textContent = "Disconnected (Device lost)";
-            statusSpan.style.color = 'red';
-            connectBtn.disabled = false;
-            disconnectBtn.disabled = true;
-            sendEventBtn.disabled = true;
-            stopEventBtn.disabled = true;
+            setConnectedState(false);
+            statusSpan.textContent = "Disconnected (Lost)";
             logger.warn("Device disconnected unexpectedly.");
         });
 
         connectBtn.addEventListener('click', async () => {
             const success = await controller.connect();
-            if (success) {
-                statusSpan.textContent = "Connected";
-                statusSpan.style.color = '#0f0';
-                connectBtn.disabled = true;
-                disconnectBtn.disabled = false;
-                sendEventBtn.disabled = false;
-                stopEventBtn.disabled = false;
-            } else {
-                statusSpan.textContent = "Connection Failed";
-                statusSpan.style.color = 'red';
-            }
+            setConnectedState(success);
         });
 
         disconnectBtn.addEventListener('click', async () => {
             await controller.disconnect();
-            statusSpan.textContent = "Disconnected";
-            statusSpan.style.color = 'white';
-            connectBtn.disabled = false;
-            disconnectBtn.disabled = true;
-            sendEventBtn.disabled = true;
-            stopEventBtn.disabled = true;
+            setConnectedState(false);
         });
 
-        const TEST_EVENT_ID = "test_event_1";
+        // --- Event Management ---
+        const activeEvents = new Map(); // Store ID -> Event Object
+        let eventCounter = 1;
+        let currentEditingId = null; // Track which event is being edited
 
-        sendEventBtn.addEventListener('click', () => {
-            // Create Event
+        // --- Live Editing Listeners ---
+        const liveInputs = document.querySelectorAll('.live-input');
+        liveInputs.forEach(input => {
+            input.addEventListener('input', () => {
+                if (currentEditingId && activeEvents.has(currentEditingId)) {
+                    const oldEvent = activeEvents.get(currentEditingId);
+                    const newEvent = getEventFromEditor();
+
+                    // Compare essential fields
+                    if (!areEventsEqual(oldEvent, newEvent)) {
+                        sendEvent(currentEditingId);
+                    }
+                }
+            });
+        });
+
+        function areEventsEqual(ev1, ev2) {
+            // Compare Effect
+            if (ev1.effect.style !== ev2.effect.style) return false;
+            if (ev1.effect.frequency !== ev2.effect.frequency) return false;
+            if (ev1.effect.duration !== ev2.effect.duration) return false;
+            if (ev1.effect.intensity !== ev2.effect.intensity) return false;
+
+            // Compare Colors (Array)
+            for (let i = 0; i < 5; i++) {
+                if (ev1.effect.color[i] !== ev2.effect.color[i]) return false;
+            }
+
+            // Compare Layer
+            if (ev1.layer.nbr !== ev2.layer.nbr) return false;
+            if (ev1.layer.opacity !== ev2.layer.opacity) return false;
+            if (ev1.layer.blendingMode !== ev2.layer.blendingMode) return false;
+
+            return true;
+        }
+
+        function renderEventList() {
+            eventList.innerHTML = '';
+            if (activeEvents.size === 0) {
+                emptyListMsg.style.display = 'block';
+                return;
+            }
+            emptyListMsg.style.display = 'none';
+
+            activeEvents.forEach((evt, id) => {
+                const li = document.createElement('li');
+                li.className = 'event-card ' + (id === currentEditingId ? 'editing' : 'active');
+
+                // Truncate color for display
+                const colorStr = evt.effect.color ? `[${evt.effect.color.slice(0, 4).join(',')}]` : '[-]';
+
+                li.innerHTML = `
+                    <div class="event-info">
+                        <strong>${id}</strong><br>
+                        Style: ${evt.effect.style} | Color: ${colorStr}
+                    </div>
+                    <div class="event-actions">
+                        <button class="btn-primary" onclick="window.recallEvent('${id}')" title="Edit this event live">
+                           ${id === currentEditingId ? 'Editing...' : '✏️ Edit Live'}
+                        </button>
+                    </div>
+                    <div class="event-actions">
+                        <button class="btn-danger" onclick="window.stopEvent('${id}')">Stop</button>
+                    </div>
+                `;
+                eventList.appendChild(li);
+            });
+        }
+
+        // Global functions for buttons (exposed to window)
+        window.stopEvent = async (id) => {
+            await controller.stopEvent(id);
+            activeEvents.delete(id);
+            if (currentEditingId === id) {
+                currentEditingId = null;
+                document.getElementById('editingIndicator').style.display = 'none';
+            }
+            renderEventList();
+            logger.info(`Stopped event ${id}`);
+        };
+
+        window.recallEvent = (id) => {
+            const evt = activeEvents.get(id);
+            if (!evt) return;
+
+            currentEditingId = id;
+            document.getElementById('editingIndicator').style.display = 'inline';
+            document.getElementById('editingIndicator').textContent = `(Editing ${id})`;
+
+            // Fill inputs
+            document.getElementById('eventId').value = id;
+            document.getElementById('styleSelect').value = evt.effect.style;
+            document.getElementById('frequency').value = evt.effect.frequency || 0;
+            document.getElementById('duration').value = evt.effect.duration || 0;
+
+            document.getElementById('colorR').value = evt.effect.color[0];
+            document.getElementById('colorG').value = evt.effect.color[1];
+            document.getElementById('colorB').value = evt.effect.color[2];
+            document.getElementById('colorW').value = evt.effect.color[3] !== undefined ? evt.effect.color[3] : 0;
+            document.getElementById('colorVib').value = evt.effect.color[4];
+
+            document.getElementById('layerNbr').value = evt.layer.nbr;
+            document.getElementById('layerOpacity').value = evt.layer.opacity;
+
+            if (evt.layer.blendingMode !== undefined) {
+                document.getElementById('layerBlending').value = evt.layer.blendingMode;
+            }
+
+            updateColorPreview();
+            renderEventList(); // Update style to show selected
+            logger.info(`Editing ${id}`);
+        };
+
+        window.updateEvent = (id) => {
+            sendEvent(id);
+        };
+
+        function getEventFromEditor() {
             const evt = new Event();
-            evt.id = 1;
-            evt.mask = 0; // Broadcast?
+            evt.mask = 0;
 
-            // Configure Effect
             evt.effect.style = parseInt(document.getElementById('styleSelect').value);
             evt.effect.frequency = parseInt(document.getElementById('frequency').value);
             evt.effect.intensity = 255;
@@ -228,25 +510,67 @@
             evt.effect.color[0] = parseInt(document.getElementById('colorR').value);
             evt.effect.color[1] = parseInt(document.getElementById('colorG').value);
             evt.effect.color[2] = parseInt(document.getElementById('colorB').value);
+            evt.effect.color[3] = parseInt(document.getElementById('colorW').value);
             evt.effect.color[4] = parseInt(document.getElementById('colorVib').value);
 
-            // Configure Layer
             evt.layer.nbr = parseInt(document.getElementById('layerNbr').value);
             evt.layer.opacity = parseInt(document.getElementById('layerOpacity').value);
             evt.layer.blendingMode = parseInt(document.getElementById('layerBlending').value);
 
-            console.log("Play Event", evt);
-            controller.playEvent(TEST_EVENT_ID, evt);
-            logger.info("Event sent!");
-        });
+            return evt;
+        }
 
-        stopEventBtn.addEventListener('click', async () => {
-            await controller.stopEvent(TEST_EVENT_ID);
-        });
+        function sendEvent(forceId = null) {
+            let id = forceId;
+            if (!id) {
+                // If we are editing live, and the ID input matches the editing ID, keep it.
+                // If user manually changed ID input, they might want to create a NEW one or Fork it.
+                const inputId = document.getElementById('eventId').value.trim();
 
-        document.getElementById('clearLogBtn').addEventListener('click', () => {
-            logArea.innerHTML = '';
-        });
+                if (currentEditingId && inputId === currentEditingId) {
+                    id = currentEditingId;
+                } else {
+                    // New/Fork mode
+                    id = inputId;
+                    if (!id) {
+                        id = `evt_${eventCounter++}`;
+                        document.getElementById('eventId').value = id;
+                    }
+                    // If we created a new event, make it the editing one?
+                    // Let's say yes, if triggered by button. But this function is also called by live update.
+                    // The live update only calls with forceId.
+                    // So if we are here, it's the Button click.
+                    currentEditingId = id;
+                }
+            }
+
+            const evt = getEventFromEditor();
+            // Try to extract numeric ID
+            const match = id.match(/(\d+)/);
+            evt.id = match ? parseInt(match[0]) : 1;
+
+            controller.playEvent(id, evt);
+
+            // Store Object in Map
+            activeEvents.set(id, evt);
+
+            // Only re-render if we are NOT live updating to avoid UI flicker/focus loss?
+            // Actually re-rendering the whole list might lose focus if we were editing inside the list, 
+            // but the editor is separate. So it's fine.
+            // But we should optimize to not re-render if unnecessary.
+            renderEventList();
+
+            if (!forceId) {
+                // Only log on manual send
+                logger.info(`Sent event ${id}`);
+                document.getElementById('editingIndicator').style.display = 'inline';
+                document.getElementById('editingIndicator').textContent = `(Editing ${id})`;
+            }
+        }
+
+        sendEventBtn.addEventListener('click', () => sendEvent());
+
+        document.getElementById('clearLogBtn').addEventListener('click', () => logArea.innerHTML = '');
 
     </script>
 </body>

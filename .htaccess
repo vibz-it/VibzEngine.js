@@ -1,0 +1,16 @@
+# Assure que le fichier est servi comme fichier statique et non redirigé (Wordpress/CMS)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^ - [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|mjs)$">
+        Header set Access-Control-Allow-Origin "*"
+    </FilesMatch>
+</IfModule>
+
+# MIME Types (Important)
+AddType application/javascript .js
+AddType application/javascript .mjs

@@ -8,6 +8,59 @@ A JavaScript library to control Vibz light-up wristbands via Web Serial API.
 - **Event Management**: Handles event keep-alive (watchdog) and refreshing logic.
 - **Low Latency**: Optimized for high-performance timing (up to 500k baud).
 
+## Deployment & CORS (Framer Integration)
+
+To use this library in Framer (or any other external web app), your server must allow Cross-Origin Resource Sharing (CORS). This means adding the `Access-Control-Allow-Origin: *` header to your server's response for `.js` files.
+
+### 1. Apache (.htaccess) - Standard for OVH Shared Hosting
+Create or edit the `.htaccess` file in your root or library folder:
+```apache
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|mjs)$">
+        Header set Access-Control-Allow-Origin "*"
+    </FilesMatch>
+</IfModule>
+```
+
+### 2. Nginx (nginx.conf)
+Add this to your server block or location block:
+```nginx
+location ~* \.(js|mjs)$ {
+    add_header Access-Control-Allow-Origin *;
+}
+```
+
+### 3. Vercel (vercel.json)
+Create a `vercel.json` file:
+```json
+{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" }
+      ]
+    }
+  ]
+}
+```
+
+### 4. Netlify (_headers)
+Create a `_headers` file in your publish directory:
+```
+/*
+  Access-Control-Allow-Origin: *
+```
+
+### 5. PHP (If serving via PHP)
+Add this at the very top of your PHP file serving the content:
+```php
+<?php
+header("Access-Control-Allow-Origin: *");
+// ... rest of your code
+?>
+```
+
 ## Directory Structure
 ```
 /src

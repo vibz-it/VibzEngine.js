@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link href="https://fonts.googleapis.com/css2?family=Mukta:wght@400;600;700&display=swap" rel="stylesheet">
+    <title>My Web Page</title>
+    <style>
+        /* Basic styles for all screen sizes */
+        body {
+            background-color: rgb(244, 252, 255); 
+            color: #303b40;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+            text-align: center;
+            font-family: 'Mukta', sans-serif;   
+        }
+
+        .logo {
+            max-width: 100%; /* Allow logo to scale down */
+            height: auto;     /* Maintain aspect ratio */
+            margin-bottom: 0px;
+        }
+
+        hr {
+            margin-top: 0px;
+            margin-bottom: 0px;
+            width: 80%; /* Adjust width relative to screen size */
+            max-width: 280px; /* Set a maximum width */
+            border: 0;
+            border-top: 2px solid #303b40;
+        }
+
+        .subtitle {
+            color: rgb(180, 76, 40);
+            font-size: 1.5rem; /* Use relative units for font size */
+            font-weight: 600;
+            margin-top: 0px;
+            margin-bottom: 0px;
+        }
+
+        .content {
+            margin-top: 5px;
+        }
+
+        .highlight {
+            /* font-size: 1.7rem; /* Increase the font size */
+            /*color: rgb(255, 69, 0); /* Change text color */
+            font-weight: 700; /* Make the text bold */
+            /*text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3); /* Add a subtle shadow */
+            margin-bottom: 10px; /* Add some space after the highlighted text */
+        }
+
+        .contact-info {
+            margin-top: 0px;
+            color: #6a848d;
+        }
+
+        /* Media queries for responsiveness */
+        @media (max-width: 768px) { 
+            /* Styles for tablets and smaller screens */
+            .subtitle {
+                font-size: 1.2rem; 
+            }
+            .highlight {
+                font-size: 1.5rem; /* Adjust font size for smaller screens */
+            }
+        }
+
+        @media (max-width: 480px) { 
+            /* Styles for mobile phones */
+            .subtitle {
+                font-size: 1rem; 
+            }
+            .highlight {
+                font-size: 1.2rem; /* Adjust font size for even smaller screens */
+            }
+        }
+    </style>
+</head>
+<body>
+    <img class="logo" src="logo.png" alt="Logo"> 
+    <div class="subtitle">
+        <p>Innovative Interactive Wearables</p>
+    </div>
+    <hr> 
+    <div class="content">
+        <p class="highlight">Immerse your audience inside the show</p>
+        <p>Designs and manufactures innovative interactive wearables for public</p>
+        <p>event productions and festivals, creating unforgettable immersive</p>
+        <p>experiences by connecting audiences directly to the stage.</p>
+    </div>
+    <div class="contact-info">
+        <p><a href="mailto:info@easio.eu">info@easio.eu</a> | <a href="tel:+32475722441"> +32 (0) 475 722 441</a></p>
+        <p>Tribomont - 4860 Wegnez - Belgium</p> 
+    </div>
+</body>
+</html>
