@@ -2,6 +2,8 @@ import type { Event } from '../protocol/BinaryTypes.js';
 
 export class VibzController {
   constructor();
+  /** Device reference time (ms). Relative event times are `Date.now() - referenceTime`. */
+  get referenceTime(): number;
   connect(): Promise<boolean>;
   disconnect(): Promise<void>;
   setOnDisconnect(callback: (() => void) | null): void;

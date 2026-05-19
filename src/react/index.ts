@@ -3,6 +3,9 @@ export type { VibzContextValue, VibzProviderProps, VibzStatus } from './VibzProv
 
 export { useVibz } from './useVibz.js';
 
+export { useVibzEvent } from './useVibzEvent.js';
+export type { UseVibzEventOptions, UseVibzEventReturn } from './useVibzEvent.js';
+
 export { useVibzButton } from './useVibzButton.js';
 export type {
   UseVibzButtonOptions,
@@ -13,6 +16,28 @@ export type {
 
 export { VibzButton } from './VibzButton.js';
 export type { VibzButtonProps } from './VibzButton.js';
+
+export { useVibzChoreography } from './useVibzChoreography.js';
+export type {
+  UseVibzChoreographyOptions,
+  UseVibzChoreographyReturn,
+  MediaClock,
+} from './useVibzChoreography.js';
+
+export {
+  normalizeScript,
+  intensityAt,
+  hasIntensityVariation,
+  buildChoreographyEvent,
+} from './choreography.js';
+export type {
+  Choreography,
+  ChoreographyEvent,
+  ChoreographyEffect,
+  ChoreographyLayer,
+  Intensity,
+  IntensityKeyframe,
+} from './choreography.js';
 
 export { buildEvent } from './event-builder.js';
 export type {

@@ -34,6 +34,14 @@ export interface EventDescriptor {
   mask?: number;
   /** Target a specific device UID; 0n broadcasts to all. */
   targetUid?: bigint;
+  /**
+   * Relative start time in ms (device clock = Date.now() - referenceTime).
+   * Leave unset for "start now" — the controller fills it in. Set explicitly
+   * to phase-align an effect to an external timeline (see useVibzChoreography).
+   */
+  startTime?: number;
+  /** Relative stop time in ms. Pair with `startTime` for scheduled playback. */
+  stopTime?: number;
 }
 
 /**
@@ -45,6 +53,8 @@ export function buildEvent(desc: EventDescriptor): VibzEvent {
 
   if (desc.mask !== undefined) evt.mask = desc.mask;
   if (desc.targetUid !== undefined) evt.targetUid = desc.targetUid;
+  if (desc.startTime !== undefined) evt.startTime = desc.startTime;
+  if (desc.stopTime !== undefined) evt.stopTime = desc.stopTime;
 
   const fx = desc.effect;
   if (fx.style !== undefined) evt.effect.style = fx.style;

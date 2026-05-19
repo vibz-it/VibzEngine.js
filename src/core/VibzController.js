@@ -46,6 +46,16 @@ export class VibzController {
     }
 
     /**
+     * Device reference time (ms, Unix epoch). Relative event times are
+     * `Date.now() - referenceTime`. Stable for the life of a connection;
+     * used to phase-align scheduled events to an external timeline.
+     * @returns {number}
+     */
+    get referenceTime() {
+        return this.timeManager.referenceTime;
+    }
+
+    /**
      * Start playing an effect (creates an event).
      * @param {string} id - Unique ID
      * @param {Event} eventObject - The Event object
