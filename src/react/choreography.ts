@@ -79,8 +79,24 @@ function buildNameIndex(enumObj: Record<string, number>): Map<string, number> {
   for (const [k, v] of Object.entries(enumObj)) m.set(k.toLowerCase(), v);
   return m;
 }
+function buildNumberIndex(enumObj: Record<string, number>): Map<number, string> {
+  const m = new Map<number, string>();
+  for (const [k, v] of Object.entries(enumObj)) if (!m.has(v)) m.set(v, k);
+  return m;
+}
 const STYLE_BY_NAME = buildNameIndex(Styles as unknown as Record<string, number>);
 const BLEND_BY_NAME = buildNameIndex(BlendingModes as unknown as Record<string, number>);
+const STYLE_NAME = buildNumberIndex(Styles as unknown as Record<string, number>);
+const BLEND_NAME = buildNumberIndex(BlendingModes as unknown as Record<string, number>);
+
+/** Human style name for a protocol number, or the number itself if unnamed. */
+export function styleName(value: number): string | number {
+  return STYLE_NAME.get(value) ?? value;
+}
+/** Human blending-mode name for a protocol number, or the number if unnamed. */
+export function blendingModeName(value: number): string | number {
+  return BLEND_NAME.get(value) ?? value;
+}
 
 function resolveEnum(
   value: unknown,
@@ -300,4 +316,46 @@ export function buildChoreographyEvent(
     startTime: timing.startTimeMs,
     stopTime: timing.stopTimeMs,
   });
+}
+
+/**
+ * Inverse of {@link normalizeScript}: produce a clean, human-readable v2
+ * document. Enum values are written as names when known; `mask` is omitted
+ * when 0. Round-trips through `normalizeScript` losslessly.
+ */
+export function serializeChoreography(c: Choreography): Record<string, unknown> {
+  return {
+    version: 2,
+    ...(c.name ? { name: c.name } : {}),
+    ...(c.duration !== undefined ? { duration: c.duration } : {}),
+    loop: c.loop,
+    events: c.events.map((e) => ({
+      id: e.id,
+      start: round3(e.start),
+      duration: round3(e.duration),
+      ...(e.mask ? { mask: e.mask } : {}),
+      layer: {
+        nbr: e.layer.nbr,
+        opacity: e.layer.opacity,
+        blendingMode: blendingModeName(e.layer.blendingMode),
+      },
+      effect: {
+        style: styleName(e.effect.style),
+        frequency: e.effect.frequency,
+        duration: e.effect.duration,
+        color: e.effect.color,
+        intensity: Array.isArray(e.effect.intensity)
+          ? e.effect.intensity.map((k) => ({
+              at: round3(k.at),
+              value: k.value,
+              ...(k.easing === 'hold' ? { easing: 'hold' } : {}),
+            }))
+          : e.effect.intensity,
+      },
+    })),
+  };
+}
+
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }

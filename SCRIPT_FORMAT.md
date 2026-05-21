@@ -93,6 +93,26 @@ pause/seek is detected (>50 ms drift). A watchdog stop time keeps the device
 from latching if refreshes stop. Loop wrap / seek-back is detected and re-arms
 events cleanly.
 
+## Authoring (Studio)
+
+Scripts can be written by hand or with the visual editor shipped as a separate
+lazy entry point:
+
+```js
+import { VibzChoreographyStudio } from 'vibz-engine/studio';
+```
+
+`<VibzChoreographyStudio onClose siteVideoSrc? initialScript? />` — a
+full-screen overlay: load a local video (drag & drop / file picker, never
+uploaded), lay out events on a per-layer timeline (drag to move, edge-drag to
+resize), edit the **intensity envelope** directly on the block (drag points,
+double-click to add, right/Alt-click to remove), edit fields in the side
+form, and **Export JSON** in v2. Copy/paste/duplicate, right-click context
+menu, and shortcuts (`Del`, `Space` play/pause, `Ctrl/Cmd+C/V`, `Esc`) are
+supported. While a bracelet is connected it previews the choreography live,
+locked to the video (it reuses `useVibzChoreography`). Import accepts v2
+**and** legacy files.
+
 ## Legacy → v2 mapping
 
 | Legacy                                              | v2 |

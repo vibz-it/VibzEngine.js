@@ -26,9 +26,12 @@ export type {
 
 export {
   normalizeScript,
+  serializeChoreography,
   intensityAt,
   hasIntensityVariation,
   buildChoreographyEvent,
+  styleName,
+  blendingModeName,
 } from './choreography.js';
 export type {
   Choreography,

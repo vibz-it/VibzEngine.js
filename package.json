@@ -20,6 +20,16 @@
         "types": "./react-dist/index.d.cts",
         "default": "./react-dist/index.cjs"
       }
+    },
+    "./studio": {
+      "import": {
+        "types": "./react-dist/studio.d.ts",
+        "default": "./react-dist/studio.js"
+      },
+      "require": {
+        "types": "./react-dist/studio.d.cts",
+        "default": "./react-dist/studio.cjs"
+      }
     }
   },
   "files": [
