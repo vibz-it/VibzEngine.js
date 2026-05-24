@@ -5,17 +5,20 @@ import {
   useRef,
   useState,
   type PointerEvent as RPointerEvent,
+  type RefObject,
 } from 'react';
 import { useVibz } from '../useVibz.js';
-import { useVibzChoreography } from '../useVibzChoreography.js';
+import { useVibzChoreography, type MediaClock } from '../useVibzChoreography.js';
 import {
   normalizeScript,
   serializeChoreography,
+  spotifyUriFromInput,
   intensityAt,
   type Choreography,
   type ChoreographyEvent,
   type IntensityKeyframe,
 } from '../choreography.js';
+import { useSpotifyOptional } from '../spotify/index.js';
 import { useStudioStyles } from './styles.js';
 
 // React's type export name differs across setups; alias the few we use.
@@ -28,6 +31,12 @@ export interface VibzChoreographyStudioProps {
   siteVideoSrc?: string;
   /** Optional initial script (URL string or object) to open with. */
   initialScript?: string | object;
+  /**
+   * Spotify app Client ID. When set, the editor can author against a Spotify
+   * track (Web Playback SDK) instead of a video file. Requires the editor
+   * user to have Spotify Premium and to log in.
+   */
+  spotifyClientId?: string;
 }
 
 const STYLE_OPTIONS: Array<[number, string]> = [
@@ -53,6 +62,16 @@ const fmtTime = (s: number) => {
 };
 const clampN = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const snap = (s: number) => Math.round(s * 20) / 20; // 0.05 s grid
+
+/**
+ * True when an [r,g,b,…] block colour is dark enough that black text/strokes
+ * would be unreadable — callers flip to a light foreground. Uses perceived
+ * (sRGB-weighted) luminance.
+ */
+function isDarkBg(color: number[]): boolean {
+  const [r = 0, g = 0, b = 0] = color;
+  return 0.299 * r + 0.587 * g + 0.114 * b < 140;
+}
 
 function emptyModel(): Choreography {
   return { version: 2, name: 'Untitled', loop: true, events: [] };
@@ -97,10 +116,57 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   const [toast, setToast] = useState<string | null>(null);
   const idSeq = useRef(1);
 
+  // ---- media source: video (default) or Spotify ----------------------------
+  const [mediaMode, setMediaMode] = useState<'video' | 'spotify'>('video');
+  const [spotifyUri, setSpotifyUri] = useState('');
+  // Shared player from <SpotifyProvider> — never our own instance (the Web
+  // Playback SDK allows only one player per page).
+  const spotify = useSpotifyOptional();
+  // Refs so timeline/keyboard handlers read the live source without re-binding.
+  const modeRef = useRef(mediaMode);
+  modeRef.current = mediaMode;
+  const spotifyRef = useRef(spotify);
+  spotifyRef.current = spotify;
+
+  // The clock the preview engine + timeline follow, per active source. A
+  // <video> element and the Spotify clock both satisfy MediaClock.
+  const activeClockRef = (
+    mediaMode === 'spotify' ? spotify.player.clockRef : videoRef
+  ) as RefObject<MediaClock | null>;
+
   const flash = useCb((m: string) => {
     setToast(m);
     window.setTimeout(() => setToast(null), 1800);
   }, []);
+
+  // Switch to Spotify mode + prefill the URI when a loaded script is bound to
+  // a Spotify track.
+  const applyMediaFromModel = useCb((m: Choreography) => {
+    if (m.media?.type === 'spotify') {
+      setMediaMode('spotify');
+      setSpotifyUri(m.media.uri);
+    }
+  }, []);
+
+  // Start the entered Spotify track and remember it on the model (so export
+  // carries `media`).
+  const loadSpotifyTrack = useCb(async () => {
+    const uri = spotifyUriFromInput(spotifyUri);
+    if (!uri) {
+      flash('Lien/URI Spotify invalide');
+      return;
+    }
+    try {
+      await spotifyRef.current.player.playTrack(uri);
+      const title = spotifyRef.current.player.track?.title;
+      setModel((m) => ({
+        ...m,
+        media: { type: 'spotify', uri, ...(title ? { title } : {}) },
+      }));
+    } catch (e) {
+      flash((e as Error).message);
+    }
+  }, [spotifyUri, flash]);
 
   // ---- optional initial script ---------------------------------------------
   useEffect(() => {
@@ -108,7 +174,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     if (!s) return;
     const load = (raw: unknown) => {
       try {
-        setModel(normalizeScript(raw));
+        const m = normalizeScript(raw);
+        setModel(m);
+        applyMediaFromModel(m);
       } catch (e) {
         flash(`Import failed: ${(e as Error).message}`);
       }
@@ -118,11 +186,11 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     } else {
       load(s);
     }
-  }, [props.initialScript, flash]);
+  }, [props.initialScript, flash, applyMediaFromModel]);
 
   // ---- live preview (reuses the shipped sync engine) -----------------------
   const previewScript = useMemo(() => model, [model]);
-  useVibzChoreography({ script: previewScript, media: videoRef, enabled: true });
+  useVibzChoreography({ script: previewScript, media: activeClockRef, enabled: true });
 
   // ---- video loading -------------------------------------------------------
   const loadFile = useCb((file: File) => {
@@ -146,15 +214,20 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      const v = videoRef.current;
-      if (v) setNow(v.currentTime);
+      const t =
+        modeRef.current === 'spotify'
+          ? spotifyRef.current.player.clockRef.current?.currentTime ?? 0
+          : videoRef.current?.currentTime ?? 0;
+      setNow(t);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const duration = videoDur || model.duration || 30;
+  const spotifyDur = spotify.player.duration;
+  const duration =
+    (mediaMode === 'spotify' ? spotifyDur : videoDur) || model.duration || 30;
   const trackW = Math.max(600, duration * pps);
 
   const fit = useCb(() => {
@@ -217,10 +290,11 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   const seek = useCb(
     (clientX: number) => {
       const sc = scrollRef.current;
-      const v = videoRef.current;
-      if (!sc || !v) return;
+      if (!sc) return;
       const x = clientX - sc.getBoundingClientRect().left + sc.scrollLeft;
-      v.currentTime = clampN(x / pps, 0, duration);
+      const target = clampN(x / pps, 0, duration);
+      if (modeRef.current === 'spotify') void spotifyRef.current.player.seek(target);
+      else if (videoRef.current) videoRef.current.currentTime = target;
     },
     [pps, duration]
   );
@@ -239,13 +313,14 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           idSeq.current = maxN + 1;
           setModel(m);
           setSelId(null);
+          applyMediaFromModel(m);
           flash(`Imported ${m.events.length} events`);
         } catch (e) {
           flash(`Import failed: ${(e as Error).message}`);
         }
       });
     },
-    [flash]
+    [flash, applyMediaFromModel]
   );
   const exportJson = useCb(() => {
     const json = JSON.stringify(serializeChoreography(model), null, 2);
@@ -330,18 +405,26 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
         }
       } else if (mod && e.key.toLowerCase() === 'v') {
         e.preventDefault();
-        pasteAt(videoRef.current?.currentTime ?? 0);
+        const t =
+          modeRef.current === 'spotify'
+            ? spotifyRef.current.player.clockRef.current?.currentTime ?? 0
+            : videoRef.current?.currentTime ?? 0;
+        pasteAt(t);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selRef.current) {
           e.preventDefault();
           delEvent(selRef.current);
         }
       } else if (e.key === ' ') {
-        const v = videoRef.current;
-        if (v) {
-          e.preventDefault();
-          if (v.paused) void v.play();
-          else v.pause();
+        e.preventDefault();
+        if (modeRef.current === 'spotify') {
+          void spotifyRef.current.player.toggle();
+        } else {
+          const v = videoRef.current;
+          if (v) {
+            if (v.paused) void v.play();
+            else v.pause();
+          }
         }
       } else if (e.key === 'Escape') {
         setMenu((m) => (m ? null : m));
@@ -395,8 +478,102 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
 
       <div className="vz-body">
         <div className="vz-left">
+          <div className="vz-srcswitch" style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <button
+              className={mediaMode === 'video' ? 'primary' : ''}
+              onClick={() => setMediaMode('video')}
+            >
+              🎬 Video
+            </button>
+            <button
+              className={mediaMode === 'spotify' ? 'primary' : ''}
+              onClick={() => setMediaMode('spotify')}
+            >
+              🎵 Spotify
+            </button>
+          </div>
           <div className="vz-video-wrap">
-            {videoUrl ? (
+            {mediaMode === 'spotify' ? (
+              <div className="vz-drop" style={{ display: 'block', textAlign: 'left' }}>
+                <p
+                  style={{
+                    fontSize: 16,
+                    marginTop: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  🎵 Spotify
+                  <span
+                    className={`vz-pill ${spotify.player.ready ? 'on' : 'off'}`}
+                    style={{ marginLeft: 'auto' }}
+                  >
+                    {!props.spotifyClientId
+                      ? 'No Client ID'
+                      : !spotify.auth.isAuthed
+                        ? 'Signed out'
+                        : spotify.player.error
+                          ? 'Error'
+                          : spotify.player.ready
+                            ? 'Ready'
+                            : 'Connecting…'}
+                  </span>
+                </p>
+                {!props.spotifyClientId ? (
+                  <p className="vz-hint">
+                    Set <code>VITE_SPOTIFY_CLIENT_ID</code> to author against a
+                    Spotify track.
+                  </p>
+                ) : !spotify.auth.isAuthed ? (
+                  <button className="primary" onClick={() => void spotify.auth.login()}>
+                    Sign in to Spotify
+                  </button>
+                ) : (
+                  <>
+                    <div className="vz-row" style={{ gap: 8 }}>
+                      <input
+                        style={{ flex: 1 }}
+                        placeholder="spotify:track:… or open.spotify.com link"
+                        value={spotifyUri}
+                        onChange={(e) => setSpotifyUri(e.target.value)}
+                      />
+                      <button
+                        className="primary"
+                        disabled={!spotify.player.ready}
+                        onClick={() => void loadSpotifyTrack()}
+                      >
+                        Load
+                      </button>
+                    </div>
+                    <div className="vz-vidctl" style={{ marginTop: 10 }}>
+                      <button
+                        disabled={!spotify.player.ready}
+                        onClick={() => void spotify.player.toggle()}
+                      >
+                        {spotify.player.paused ? '▶ Play' : '⏸ Pause'}
+                      </button>
+                      <span>
+                        {fmtTime(now)} / {fmtTime(duration)}
+                      </span>
+                      {spotify.player.track && (
+                        <span style={{ opacity: 0.8 }}>
+                          ♪ {spotify.player.track.title} — {spotify.player.track.artist}
+                        </span>
+                      )}
+                    </div>
+                    {spotify.player.error && (
+                      <p className="vz-hint" style={{ color: '#ff6b6b' }}>
+                        {spotify.player.error.message}
+                      </p>
+                    )}
+                    <p className="vz-hint">
+                      Premium required. The track is saved into the script on export.
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : videoUrl ? (
               <>
                 <video
                   ref={videoRef}
@@ -535,6 +712,10 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                           left: ev.start * pps,
                           width: Math.max(6, ev.duration * pps),
                           background: `rgb(${ev.effect.color[0]},${ev.effect.color[1]},${ev.effect.color[2]})`,
+                          color: isDarkBg(ev.effect.color) ? '#f4f5f7' : '#0a0a0a',
+                          borderColor: isDarkBg(ev.effect.color)
+                            ? 'rgba(255,255,255,0.55)'
+                            : 'rgba(0,0,0,0.45)',
                         }}
                         onPointerDown={(e) => onEvPointerDown(e, ev, 'move')}
                         onPointerMove={onEvPointerMove}
@@ -566,7 +747,12 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                           onPointerUp={onEvPointerUp}
                         />
                         {STYLE_OPTIONS.find(([v]) => v === ev.effect.style)?.[1] ?? ev.effect.style}
-                        <EnvelopeOverlay ev={ev} onChange={(fn) => patch(ev.id, fn)} />
+                        <EnvelopeOverlay
+                          ev={ev}
+                          width={Math.max(6, ev.duration * pps)}
+                          stroke={isDarkBg(ev.effect.color) ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.7)'}
+                          onChange={(fn) => patch(ev.id, fn)}
+                        />
                         <span
                           className="grip r"
                           onPointerDown={(e) => onEvPointerDown(e, ev, 'r')}
@@ -651,16 +837,25 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
  */
 function EnvelopeOverlay(props: {
   ev: ChoreographyEvent;
+  /** Block pixel width — ties the curve geometry to resizes (see below). */
+  width: number;
+  /** Curve colour, contrast-matched to the block background by the caller. */
+  stroke: string;
   onChange: (fn: (e: ChoreographyEvent) => ChoreographyEvent) => void;
 }) {
-  const { ev, onChange } = props;
+  const { ev, width, stroke, onChange } = props;
   const intensity = ev.effect.intensity;
   const isArr = Array.isArray(intensity);
   const dragIdx = useRef<number | null>(null);
 
+  // X coordinates are anchored to the block's pixel width so `points` (and the
+  // viewBox) change on every resize. Without this, Chrome keeps the stretched
+  // SVG's old geometry when only the container resizes and the curve lags
+  // behind the (percentage-positioned) keyframe handles.
+  const w = Math.max(1, width);
   const line = Array.from({ length: 25 }, (_, i) => {
     const p = i / 24;
-    return `${p * 100},${100 - (intensityAt(intensity, p) / 255) * 100}`;
+    return `${(p * w).toFixed(2)},${(100 - (intensityAt(intensity, p) / 255) * 100).toFixed(2)}`;
   }).join(' ');
 
   const setKf = (idx: number, at: number, value: number) =>
@@ -680,7 +875,7 @@ function EnvelopeOverlay(props: {
     <>
       <svg
         className="env"
-        viewBox="0 0 100 100"
+        viewBox={`0 0 ${w} 100`}
         preserveAspectRatio="none"
         width="100%"
         height="100%"
@@ -688,7 +883,7 @@ function EnvelopeOverlay(props: {
         <polyline
           points={line}
           fill="none"
-          stroke="rgba(0,0,0,.7)"
+          stroke={stroke}
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"

@@ -32,15 +32,20 @@ export {
   buildChoreographyEvent,
   styleName,
   blendingModeName,
+  spotifyUriFromInput,
 } from './choreography.js';
 export type {
   Choreography,
   ChoreographyEvent,
   ChoreographyEffect,
   ChoreographyLayer,
+  ChoreographyMedia,
   Intensity,
   IntensityKeyframe,
 } from './choreography.js';
+
+// Spotify playback (Web Playback SDK) bindings.
+export * from './spotify/index.js';
 
 export { buildEvent } from './event-builder.js';
 export type {

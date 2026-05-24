@@ -61,13 +61,54 @@ export interface ChoreographyEvent {
   effect: ChoreographyEffect;
 }
 
+/**
+ * The media a script is authored against. Lets a single `.json` carry the
+ * track/clip it was choreographed to, so a player can reload both at once.
+ *  - `spotify`: a Spotify track URI (`spotify:track:…`), played via the Web
+ *    Playback SDK. Requires a Premium listener.
+ *  - `video` / `audio`: a same-origin or absolute media URL.
+ */
+export type ChoreographyMedia =
+  | { type: 'spotify'; uri: string; title?: string }
+  | { type: 'video'; src: string }
+  | { type: 'audio'; src: string };
+
 export interface Choreography {
   version: 2;
   name?: string;
   /** Indicative media duration (seconds). Playback follows the bound media. */
   duration?: number;
+  /** Optional bound media (e.g. the Spotify track this script was built for). */
+  media?: ChoreographyMedia;
   loop: boolean;
   events: ChoreographyEvent[];
+}
+
+/**
+ * Coerce a Spotify track reference into a canonical `spotify:track:<id>` URI.
+ * Accepts an already-canonical URI or an `open.spotify.com/track/<id>` URL
+ * (with or without query/locale segments). Returns `null` if unrecognised.
+ */
+export function spotifyUriFromInput(input: string): string | null {
+  const s = input.trim();
+  const uri = /^spotify:track:([A-Za-z0-9]+)$/.exec(s);
+  if (uri) return `spotify:track:${uri[1]}`;
+  const url = /open\.spotify\.com\/(?:[a-z-]+\/)?track\/([A-Za-z0-9]+)/.exec(s);
+  if (url) return `spotify:track:${url[1]}`;
+  return null;
+}
+
+function normalizeMedia(raw: unknown): ChoreographyMedia | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  if (r.type === 'spotify' && typeof r.uri === 'string') {
+    const uri = spotifyUriFromInput(r.uri) ?? r.uri;
+    return { type: 'spotify', uri, ...(typeof r.title === 'string' ? { title: r.title } : {}) };
+  }
+  if ((r.type === 'video' || r.type === 'audio') && typeof r.src === 'string') {
+    return { type: r.type, src: r.src };
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +313,7 @@ export function normalizeScript(input: unknown): Choreography {
         : typeof raw.videoDuration === 'number'
           ? (raw.videoDuration as number)
           : undefined,
+    media: normalizeMedia(raw.media),
     loop: raw.loop === true,
     events: (raw.events as Record<string, unknown>[]).map((e, i) => normalizeEvent(e, i + 1)),
   };
@@ -328,6 +370,7 @@ export function serializeChoreography(c: Choreography): Record<string, unknown> 
     version: 2,
     ...(c.name ? { name: c.name } : {}),
     ...(c.duration !== undefined ? { duration: c.duration } : {}),
+    ...(c.media ? { media: c.media } : {}),
     loop: c.loop,
     events: c.events.map((e) => ({
       id: e.id,
