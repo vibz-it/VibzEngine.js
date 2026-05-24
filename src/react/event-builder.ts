@@ -42,6 +42,13 @@ export interface EventDescriptor {
   startTime?: number;
   /** Relative stop time in ms. Pair with `startTime` for scheduled playback. */
   stopTime?: number;
+  /**
+   * When false, the device keep-alive loop won't extend this event's stop to
+   * now+watchdog — it honours the `stopTime` you set, so the device self-stops
+   * on time even if a stop frame is dropped. Use for precisely scheduled events
+   * you refresh yourself (see useVibzChoreography). Default true.
+   */
+  autoExtend?: boolean;
 }
 
 /**
@@ -55,6 +62,7 @@ export function buildEvent(desc: EventDescriptor): VibzEvent {
   if (desc.targetUid !== undefined) evt.targetUid = desc.targetUid;
   if (desc.startTime !== undefined) evt.startTime = desc.startTime;
   if (desc.stopTime !== undefined) evt.stopTime = desc.stopTime;
+  if (desc.autoExtend !== undefined) evt.autoExtend = desc.autoExtend;
 
   const fx = desc.effect;
   if (fx.style !== undefined) evt.effect.style = fx.style;

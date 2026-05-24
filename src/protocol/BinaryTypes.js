@@ -107,6 +107,12 @@ export class Event {
         this.targetUid = 0n; // BigInt
         this.startTime = 0; // Relative time ms (int32)
         this.stopTime = 0; // Relative time ms (int32)
+        // Control flag (NOT serialized). When false, the EventManager refresh
+        // loop re-sends this event as-is instead of extending stopTime to
+        // now + watchdog. Callers that schedule a precise stop (the choreography
+        // engine) set this so the device honours their stopTime and self-stops
+        // even if the explicit stop frame is dropped on the link.
+        this.autoExtend = true;
 
         this.layer = new Layer();
         this.effect = new Effect();

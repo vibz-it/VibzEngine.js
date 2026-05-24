@@ -391,6 +391,10 @@ export function buildChoreographyEvent(
     },
     startTime: timing.startTimeMs,
     stopTime: timing.stopTimeMs,
+    // The choreography engine owns the stop time (min(eventStop, now+watchdog)),
+    // so the device keep-alive loop must not extend it — this lets the device
+    // self-stop at the real end even if the explicit stop frame is lost.
+    autoExtend: false,
   });
 }
 

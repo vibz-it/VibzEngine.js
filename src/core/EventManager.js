@@ -130,8 +130,15 @@ export class EventManager {
 
                 const relativeNow = now - refTime;
 
-                // Update STOP time to extend life
-                event.stopTime = relativeNow + Config.EVENT_WATCHDOG_DURATION;
+                // Keep-alive watchdog: extend the stop time so the device keeps
+                // playing between refreshes. Skipped for events that schedule
+                // their own precise stop (autoExtend === false, e.g. the
+                // choreography engine sends min(eventStop, now+watchdog) itself)
+                // — that way the device honours the real end and self-stops even
+                // if the explicit stop frame is dropped on the link.
+                if (event.autoExtend !== false) {
+                    event.stopTime = relativeNow + Config.EVENT_WATCHDOG_DURATION;
+                }
 
                 // IMPORTANT: StartTime usually stays constant for a running event to keep phase alignment (e.g. for Wave effect)
                 // However, if we paused and resumed, reference time might have changed?

@@ -44,6 +44,11 @@ export class Event {
   startTime: number;
   /** Relative time in ms (int32) */
   stopTime: number;
+  /**
+   * When false, the EventManager keep-alive loop re-sends this event as-is
+   * instead of extending `stopTime` to now+watchdog. Default true.
+   */
+  autoExtend: boolean;
   layer: Layer;
   effect: Effect;
   localization: Localization;
