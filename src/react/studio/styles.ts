@@ -50,6 +50,19 @@ export const STUDIO_CSS = `
 .vz-ev .grip.l{left:0;}.vz-ev .grip.r{right:0;}
 .vz-playhead{position:absolute;top:0;bottom:0;width:2px;background:#ff314b;
   pointer-events:none;z-index:3;box-shadow:0 0 6px #ff314b;}
+/* Beat grid: crisp 1px lines, virtualised to the visible range, behind events.
+   (A repeating-gradient drops/blurs hairlines at fractional px over long tracks.) */
+.vz-grid{position:absolute;inset:0;z-index:0;pointer-events:none;}
+.vz-gline{position:absolute;top:0;bottom:0;width:1px;}
+.vz-gline.sub{background:rgba(255,255,255,.07);}
+.vz-gline.beat{background:rgba(255,255,255,.20);}
+.vz-gline.bar{background:rgba(255,255,255,.45);}
+.vz-ruler .t.bar{color:#cdd;font-weight:700;border-left-color:#3a3e48;}
+.vz-grid-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.vz-grid-tools label{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#9aa;}
+.vz-grid-tools input[type=number]{width:48px;}
+.vz-grid-tools select{width:auto;}
+.vz-grid-tools .on{background:#10231a;border-color:#1f5a3f;color:#27d07f;}
 .vz-right{flex:0 0 340px;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:14px;}
 .vz-right.empty{align-items:center;justify-content:center;color:#667;text-align:center;}
 .vz-field{display:flex;flex-direction:column;gap:4px;}

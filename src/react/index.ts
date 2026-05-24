@@ -40,6 +40,7 @@ export type {
   ChoreographyEffect,
   ChoreographyLayer,
   ChoreographyMedia,
+  ChoreographyGrid,
   Intensity,
   IntensityKeyframe,
 } from './choreography.js';

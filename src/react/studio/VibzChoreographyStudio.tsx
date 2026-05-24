@@ -16,6 +16,7 @@ import {
   intensityAt,
   type Choreography,
   type ChoreographyEvent,
+  type ChoreographyGrid,
   type IntensityKeyframe,
 } from '../choreography.js';
 import { useSpotifyOptional } from '../spotify/index.js';
@@ -62,6 +63,7 @@ const fmtTime = (s: number) => {
 };
 const clampN = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const snap = (s: number) => Math.round(s * 20) / 20; // 0.05 s grid
+const round3 = (n: number) => Math.round(n * 1000) / 1000; // ms precision for time fields
 
 /**
  * True when an [r,g,b,…] block colour is dark enough that black text/strokes
@@ -80,7 +82,7 @@ function emptyModel(): Choreography {
 function newEvent(id: string, start: number): ChoreographyEvent {
   return {
     id,
-    start: snap(start),
+    start, // caller snaps (grid-aware) before constructing
     duration: 1,
     mask: 0,
     layer: { nbr: 0, opacity: 255, blendingMode: 1 },
@@ -145,8 +147,17 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     if (m.media?.type === 'spotify') {
       setMediaMode('spotify');
       setSpotifyUri(m.media.uri);
+    } else if (m.media?.type === 'video' || m.media?.type === 'audio') {
+      setMediaMode('video');
+      // Auto-reload only real (loadable) URLs/paths. A bare local filename
+      // can't be reopened by the browser, so leave the drop zone + a hint.
+      if (/^(https?:|\/|\.\/|blob:)/.test(m.media.src)) {
+        setVideoUrl(m.media.src);
+      } else {
+        flash(`This script was made with "${m.media.src}" — drop that file to preview.`);
+      }
     }
-  }, []);
+  }, [flash]);
 
   // Start the entered Spotify track and remember it on the model (so export
   // carries `media`).
@@ -199,6 +210,97 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
+  // ---- beat grid -----------------------------------------------------------
+  const [gBpm, setGBpm] = useState(120);
+  const [gOffsetSec, setGOffsetSec] = useState(0);
+  const [gBeatsPerBar, setGBeatsPerBar] = useState(4);
+  const [gSub, setGSub] = useState(1); // grid lines per beat: 1 | 2 | 4
+  const [gridEnabled, setGridEnabled] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+
+  // Live mirror so timeline/keyboard/metronome read current grid without rebind.
+  const gridRef = useRef({ gBpm, gOffsetSec, gBeatsPerBar, gSub, gridEnabled, snapEnabled });
+  gridRef.current = { gBpm, gOffsetSec, gBeatsPerBar, gSub, gridEnabled, snapEnabled };
+  const nowRef = useRef(now);
+  nowRef.current = now;
+
+  // Persist the grid into the model (so Export + the dirty-diff catch it), but
+  // never for the untracked default — keeps a fresh studio non-dirty.
+  useEffect(() => {
+    setModel((m) => {
+      const next: ChoreographyGrid | undefined =
+        gridEnabled || gBpm !== 120 || gOffsetSec !== 0 || gBeatsPerBar !== 4 || gSub !== 1
+          ? { bpm: gBpm, offset: gOffsetSec, beatsPerBar: gBeatsPerBar, subdivision: gSub }
+          : undefined;
+      if (JSON.stringify(m.grid) === JSON.stringify(next)) return m; // no-op guard
+      return { ...m, grid: next };
+    });
+  }, [gBpm, gOffsetSec, gBeatsPerBar, gSub, gridEnabled]);
+
+  // Hydrate grid state from a loaded script.
+  const applyGridFromModel = useCb((m: Choreography) => {
+    if (m.grid) {
+      setGBpm(m.grid.bpm);
+      setGOffsetSec(m.grid.offset);
+      setGBeatsPerBar(m.grid.beatsPerBar);
+      setGSub(m.grid.subdivision);
+      setGridEnabled(true);
+    }
+  }, []);
+
+  // Tap-tempo: tap along to the music to calibrate the grid. ALL taps in the
+  // burst feed a least-squares fit of playhead-time vs beat-index → average BPM
+  // (slope) + phase (intercept). The phase is folded into one period so beat
+  // numbering always starts from the beginning of the track, whatever moment
+  // tapping began (while staying aligned to the tapped beats). A >2 s gap
+  // (wall-clock, so a pause counts) resets the measurement to zero.
+  const taps = useRef<{ wall: number; track: number }[]>([]);
+  const onTap = useCb(() => {
+    const wall = performance.now();
+    const arr = taps.current;
+    if (arr.length && wall - arr[arr.length - 1].wall > 2000) arr.length = 0;
+    arr.push({ wall, track: nowRef.current });
+    const n = arr.length;
+    if (n < 2) return; // need at least two taps to measure
+    // Least-squares regression over every tap: track ≈ phase + k·period.
+    const mx = (n - 1) / 2; // mean of indices 0..n-1
+    let my = 0;
+    for (const t of arr) my += t.track;
+    my /= n;
+    let sxy = 0;
+    let sxx = 0;
+    for (let k = 0; k < n; k++) {
+      sxy += (k - mx) * (arr[k].track - my);
+      sxx += (k - mx) * (k - mx);
+    }
+    const period = sxx > 0 ? sxy / sxx : 0; // seconds per beat
+    if (!(period > 0.1 && period < 3)) return; // sanity: ~20–600 BPM
+    const bpm = Math.round((60 / period) * 100) / 100;
+    const gridPeriod = 60 / bpm; // keep phase consistent with the stored BPM
+    const phase = my - gridPeriod * mx; // playhead time of "beat 0"
+    const offset = ((phase % gridPeriod) + gridPeriod) % gridPeriod;
+    setGBpm(bpm);
+    setGOffsetSec(offset);
+    setGridEnabled(true);
+  }, []);
+  const setDownbeatHere = useCb(() => {
+    setGOffsetSec(Math.max(0, nowRef.current));
+    setGridEnabled(true);
+  }, []);
+  const nudgeOffset = useCb((d: number) => setGOffsetSec((o) => Math.max(0, o + d)), []);
+
+  // Magnetic snap: stick to the nearest grid step only within ~8px; Alt bypasses.
+  const snapTime = useCb((s: number, alt: boolean): number => {
+    const g = gridRef.current;
+    if (alt) return Math.max(0, s);
+    if (g.gridEnabled && g.snapEnabled && g.gBpm > 0) {
+      const step = 60 / g.gBpm / g.gSub;
+      const gs = g.gOffsetSec + Math.round((s - g.gOffsetSec) / step) * step;
+      if (Math.abs(s - gs) * pps < 8) return Math.max(0, gs);
+    }
+    return Math.max(0, snap(s));
+  }, [pps]);
+
   // ---- optional initial script ---------------------------------------------
   useEffect(() => {
     const s = props.initialScript;
@@ -208,6 +310,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
         const m = normalizeScript(raw);
         setModel(m);
         applyMediaFromModel(m);
+        applyGridFromModel(m);
         markCleanWith(m);
       } catch (e) {
         flash(`Import failed: ${(e as Error).message}`);
@@ -218,7 +321,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     } else {
       load(s);
     }
-  }, [props.initialScript, flash, applyMediaFromModel, markCleanWith]);
+  }, [props.initialScript, flash, applyMediaFromModel, applyGridFromModel, markCleanWith]);
 
   // ---- live preview (reuses the shipped sync engine) -----------------------
   const previewScript = useMemo(() => model, [model]);
@@ -234,6 +337,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
       if (prev?.startsWith('blob:')) URL.revokeObjectURL(prev);
       return URL.createObjectURL(file);
     });
+    // Remember which file this script was authored against (the blob URL itself
+    // is local/ephemeral, so we store the filename for reference).
+    setModel((m) => ({ ...m, media: { type: 'video', src: file.name } }));
   }, [flash]);
 
   useEffect(() => {
@@ -262,6 +368,52 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     (mediaMode === 'spotify' ? spotifyDur : videoDur) || model.duration || 30;
   const trackW = Math.max(600, duration * pps);
 
+  // Beat-grid geometry (seconds → px via pps).
+  const beatSec = 60 / gBpm;
+  const barSec = beatSec * gBeatsPerBar;
+
+  // Visible scroll window — the grid lines are virtualised to it so each stays
+  // a crisp, integer-positioned 1px element (no gradient hairline drift).
+  const [view, setView] = useState({ x: 0, w: 0 });
+  useEffect(() => {
+    const sc = scrollRef.current;
+    const update = () => { if (sc) setView({ x: sc.scrollLeft, w: sc.clientWidth }); };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [duration, pps, gridEnabled]);
+
+  const gridLines = useMemo(() => {
+    if (!gridEnabled || gBpm <= 0 || view.w <= 0) return [];
+    const bSec = 60 / gBpm;
+    const subSec = bSec / gSub;
+    const barSecL = bSec * gBeatsPerBar;
+    // Pick the finest level that won't crowd into mush (≥ ~5–6px apart).
+    let unitSec: number;
+    if (gSub > 1 && subSec * pps >= 6) unitSec = subSec;
+    else if (bSec * pps >= 5) unitSec = bSec;
+    else if (barSecL * pps >= 5) unitSec = barSecL;
+    else return [];
+    const perBeat = unitSec === subSec ? gSub : 1;
+    const tStart = view.x / pps;
+    const tEnd = (view.x + view.w) / pps;
+    const mod = (a: number, n: number) => ((a % n) + n) % n;
+    const out: Array<{ x: number; kind: 'sub' | 'beat' | 'bar' }> = [];
+    const k0 = Math.floor((tStart - gOffsetSec) / unitSec) - 1;
+    const k1 = Math.ceil((tEnd - gOffsetSec) / unitSec) + 1;
+    for (let k = k0; k <= k1; k++) {
+      const t = gOffsetSec + k * unitSec;
+      if (t < 0 || t > duration) continue;
+      let kind: 'sub' | 'beat' | 'bar';
+      if (unitSec === barSecL) kind = 'bar';
+      else if (unitSec === bSec) kind = mod(k, gBeatsPerBar) === 0 ? 'bar' : 'beat';
+      else if (mod(k, perBeat) !== 0) kind = 'sub';
+      else kind = mod(k / perBeat, gBeatsPerBar) === 0 ? 'bar' : 'beat';
+      out.push({ x: Math.round(t * pps), kind });
+    }
+    return out;
+  }, [gridEnabled, gBpm, gOffsetSec, gBeatsPerBar, gSub, pps, view, duration]);
+
   const fit = useCb(() => {
     const w = scrollRef.current?.clientWidth ?? 900;
     setPps(clampN((w - 24) / Math.max(1, duration), 10, 400));
@@ -279,9 +431,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   );
   const addEvent = useCb(() => {
     const id = `evt-${idSeq.current++}`;
-    setModel((m) => ({ ...m, events: [...m.events, newEvent(id, now)] }));
+    setModel((m) => ({ ...m, events: [...m.events, newEvent(id, snapTime(now, false))] }));
     setSelId(id);
-  }, [now]);
+  }, [now, snapTime]);
   const delEvent = useCb((id: string) => {
     setModel((m) => ({ ...m, events: m.events.filter((e) => e.id !== id) }));
     setSelId((s) => (s === id ? null : s));
@@ -306,14 +458,25 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
       const d = drag.current;
       if (!d) return;
       const dt = (e.clientX - d.x0) / pps;
+      const alt = e.altKey;
       patch(d.id, (ev) => {
-        if (d.mode === 'move') return { ...ev, start: snap(Math.max(0, d.s0 + dt)) };
-        if (d.mode === 'r') return { ...ev, duration: Math.max(0.1, snap(d.d0 + dt)) };
-        const ns = snap(clampN(d.s0 + dt, 0, d.s0 + d.d0 - 0.1));
+        if (d.mode === 'move') {
+          return { ...ev, start: snapTime(Math.max(0, d.s0 + dt), alt) };
+        }
+        if (d.mode === 'r') {
+          // Snap the END edge to the grid, then derive duration.
+          const end = snapTime(d.s0 + d.d0 + dt, alt);
+          return { ...ev, duration: Math.max(0.1, end - ev.start) };
+        }
+        // Left resize: snap the START, keep the END (s0+d0) fixed.
+        const ns = Math.min(
+          snapTime(clampN(d.s0 + dt, 0, d.s0 + d.d0 - 0.1), alt),
+          d.s0 + d.d0 - 0.1
+        );
         return { ...ev, start: ns, duration: Math.max(0.1, d.s0 + d.d0 - ns) };
       });
     },
-    [pps, patch]
+    [pps, patch, snapTime]
   );
   const onEvPointerUp = useCb(() => {
     drag.current = null;
@@ -346,6 +509,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           setModel(m);
           setSelId(null);
           applyMediaFromModel(m);
+          applyGridFromModel(m);
           markCleanWith(m);
           flash(`Imported ${m.events.length} events`);
         } catch (e) {
@@ -353,7 +517,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
         }
       });
     },
-    [flash, applyMediaFromModel, markCleanWith]
+    [flash, applyMediaFromModel, applyGridFromModel, markCleanWith]
   );
   const exportJson = useCb(() => {
     const json = JSON.stringify(serializeChoreography(model), null, 2);
@@ -408,14 +572,14 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
       const ev: ChoreographyEvent = {
         ...(JSON.parse(JSON.stringify(c)) as ChoreographyEvent),
         id,
-        start: snap(Math.max(0, time)),
+        start: snapTime(Math.max(0, time), false),
         layer: { ...c.layer, nbr: layer ?? c.layer.nbr },
       };
       setModel((m) => ({ ...m, events: [...m.events, ev] }));
       setSelId(id);
       flash('Pasted');
     },
-    [flash]
+    [flash, snapTime]
   );
   const duplicateEv = useCb(
     (id: string) => {
@@ -689,7 +853,14 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                     Choose file…
                   </button>
                   {props.siteVideoSrc && (
-                    <button onClick={() => setVideoUrl(props.siteVideoSrc!)}>Use site video</button>
+                    <button
+                      onClick={() => {
+                        setVideoUrl(props.siteVideoSrc!);
+                        setModel((m) => ({ ...m, media: { type: 'video', src: props.siteVideoSrc! } }));
+                      }}
+                    >
+                      Use site video
+                    </button>
                   )}
                 </div>
               </div>
@@ -715,13 +886,78 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
             </button>
             <button onClick={copyJson}>Copy JSON</button>
             <div className="grow" />
+            <span className="vz-grid-tools">
+              <button
+                className={gridEnabled ? 'on' : ''}
+                onClick={() => setGridEnabled((v) => !v)}
+                title="Show the beat grid"
+              >
+                Grid
+              </button>
+              <button
+                className={snapEnabled ? 'on' : ''}
+                onClick={() => setSnapEnabled((v) => !v)}
+                title="Snap events to the grid (hold Alt while dragging to bypass)"
+              >
+                Snap
+              </button>
+              <label title="Beats per minute">
+                BPM
+                <input
+                  type="number"
+                  min={20}
+                  max={400}
+                  step={0.1}
+                  value={gBpm}
+                  onChange={(e) => setGBpm(clampN(Number(e.target.value) || 0, 20, 400))}
+                />
+              </label>
+              <button onClick={onTap} title="Tap along to the beat to set tempo + phase">
+                Tap
+              </button>
+              <label title="Beats per bar (accent every N)">
+                /bar
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={gBeatsPerBar}
+                  onChange={(e) => setGBeatsPerBar(clampN(Math.round(Number(e.target.value) || 1), 1, 16))}
+                />
+              </label>
+              <select
+                value={gSub}
+                onChange={(e) => setGSub(Number(e.target.value))}
+                title="Grid lines per beat"
+              >
+                <option value={1}>1/1</option>
+                <option value={2}>1/2</option>
+                <option value={4}>1/4</option>
+              </select>
+              <button onClick={setDownbeatHere} title="Put the downbeat at the playhead">
+                ⊙ 1
+              </button>
+              <button onClick={() => nudgeOffset(-0.01)} title="Nudge grid −10 ms">◂</button>
+              <button onClick={() => nudgeOffset(0.01)} title="Nudge grid +10 ms">▸</button>
+            </span>
             <button onClick={() => setPps((p) => clampN(p * 0.8, 10, 400))}>－</button>
             <button onClick={fit}>Fit</button>
             <button onClick={() => setPps((p) => clampN(p * 1.25, 10, 400))}>＋</button>
           </div>
 
-          <div className="vz-tl-scroll" ref={scrollRef}>
+          <div
+            className="vz-tl-scroll"
+            ref={scrollRef}
+            onScroll={(e) => setView({ x: e.currentTarget.scrollLeft, w: e.currentTarget.clientWidth })}
+          >
             <div style={{ position: 'relative', width: trackW }}>
+              {gridEnabled && gBpm > 0 && (
+                <div className="vz-grid" aria-hidden="true">
+                  {gridLines.map((l, i) => (
+                    <div key={i} className={`vz-gline ${l.kind}`} style={{ left: l.x }} />
+                  ))}
+                </div>
+              )}
               <div
                 className="vz-ruler"
                 style={{ width: trackW }}
@@ -732,6 +968,14 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                     <span key={s} className="t" style={{ left: s * pps }}>{fmtTime(s)}</span>
                   ) : null
                 )}
+                {gridEnabled && gBpm > 0 && barSec > 0 &&
+                  Array.from({ length: Math.max(0, Math.ceil((duration - gOffsetSec) / barSec)) + 1 }).map((_, b) => {
+                    const x = Math.round((gOffsetSec + b * barSec) * pps);
+                    if (x < 0 || x > trackW) return null;
+                    return (
+                      <span key={`bar${b}`} className="t bar" style={{ left: x }}>{b + 1}</span>
+                    );
+                  })}
               </div>
 
               {(lanes.length ? lanes : [0]).map((ln) => (
@@ -1030,13 +1274,13 @@ function EventForm(props: {
       <div className="vz-row">
         <div className="vz-field">
           <label>Start (s)</label>
-          <input type="number" step={0.05} min={0} value={ev.start}
-            onChange={(e) => onChange((x) => ({ ...x, start: num(e.target.value) }))} />
+          <input type="number" step={0.05} min={0} value={round3(ev.start)}
+            onChange={(e) => onChange((x) => ({ ...x, start: round3(num(e.target.value)) }))} />
         </div>
         <div className="vz-field">
           <label>Duration (s)</label>
-          <input type="number" step={0.05} min={0.1} value={ev.duration}
-            onChange={(e) => onChange((x) => ({ ...x, duration: Math.max(0.1, num(e.target.value)) }))} />
+          <input type="number" step={0.05} min={0.1} value={round3(ev.duration)}
+            onChange={(e) => onChange((x) => ({ ...x, duration: Math.max(0.1, round3(num(e.target.value))) }))} />
         </div>
       </div>
       <div className="vz-field">

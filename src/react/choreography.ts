@@ -73,6 +73,21 @@ export type ChoreographyMedia =
   | { type: 'video'; src: string }
   | { type: 'audio'; src: string };
 
+/**
+ * Optional beat grid the editor uses to align events to a song's rhythm. Stored
+ * so reopening a script keeps the calibration. Playback is unaffected by it.
+ */
+export interface ChoreographyGrid {
+  /** Beats per minute. */
+  bpm: number;
+  /** Seconds offset of the first downbeat (phase). */
+  offset: number;
+  /** Beats per bar — a downbeat (strong line) every N beats. */
+  beatsPerBar: number;
+  /** Grid lines per beat: 1, 2, or 4. */
+  subdivision: number;
+}
+
 export interface Choreography {
   version: 2;
   name?: string;
@@ -80,6 +95,8 @@ export interface Choreography {
   duration?: number;
   /** Optional bound media (e.g. the Spotify track this script was built for). */
   media?: ChoreographyMedia;
+  /** Optional beat grid for the editor (BPM/offset/bar/subdivision). */
+  grid?: ChoreographyGrid;
   loop: boolean;
   events: ChoreographyEvent[];
 }
@@ -109,6 +126,22 @@ function normalizeMedia(raw: unknown): ChoreographyMedia | undefined {
     return { type: r.type, src: r.src };
   }
   return undefined;
+}
+
+function normalizeGrid(raw: unknown): ChoreographyGrid | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const bpm = Number(r.bpm);
+  if (!Number.isFinite(bpm) || bpm <= 0) return undefined;
+  const sub = Number(r.subdivision);
+  const offset = Number(r.offset);
+  const bpb = Number(r.beatsPerBar);
+  return {
+    bpm: Math.max(20, Math.min(400, bpm)),
+    offset: Number.isFinite(offset) ? offset : 0,
+    beatsPerBar: Number.isFinite(bpb) ? Math.max(1, Math.round(bpb)) : 4,
+    subdivision: sub === 2 || sub === 4 ? sub : 1,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +347,7 @@ export function normalizeScript(input: unknown): Choreography {
           ? (raw.videoDuration as number)
           : undefined,
     media: normalizeMedia(raw.media),
+    grid: normalizeGrid(raw.grid),
     loop: raw.loop === true,
     events: (raw.events as Record<string, unknown>[]).map((e, i) => normalizeEvent(e, i + 1)),
   };
@@ -371,6 +405,7 @@ export function serializeChoreography(c: Choreography): Record<string, unknown> 
     ...(c.name ? { name: c.name } : {}),
     ...(c.duration !== undefined ? { duration: c.duration } : {}),
     ...(c.media ? { media: c.media } : {}),
+    ...(c.grid ? { grid: c.grid } : {}),
     loop: c.loop,
     events: c.events.map((e) => ({
       id: e.id,
