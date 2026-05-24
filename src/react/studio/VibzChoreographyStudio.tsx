@@ -755,7 +755,18 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                         style={{ flex: 1 }}
                         placeholder="spotify:track:… or open.spotify.com link"
                         value={spotifyUri}
-                        onChange={(e) => setSpotifyUri(e.target.value)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSpotifyUri(v);
+                          // Keep the saved media in sync with the field so Export
+                          // always carries the shown track (no need to click Load).
+                          setModel((m) => {
+                            if (!v.trim()) return m;
+                            const title = m.media?.type === 'spotify' ? m.media.title : undefined;
+                            const uri = spotifyUriFromInput(v) ?? v.trim();
+                            return { ...m, media: { type: 'spotify', uri, ...(title ? { title } : {}) } };
+                          });
+                        }}
                       />
                       <button
                         className="primary"
