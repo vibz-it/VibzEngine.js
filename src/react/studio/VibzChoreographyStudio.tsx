@@ -14,12 +14,17 @@ import {
   serializeChoreography,
   spotifyUriFromInput,
   intensityAt,
+  isStripEvent,
   type Choreography,
   type ChoreographyEvent,
+  type ChoreographyEffect,
+  type ChoreographyEffectEvent,
+  type ChoreographyStripEvent,
   type ChoreographyGrid,
   type IntensityKeyframe,
 } from '../choreography.js';
 import { useSpotifyOptional } from '../spotify/index.js';
+import { Styles, StripStyles } from '../../protocol/Identifiers.js';
 import { useStudioStyles } from './styles.js';
 
 // React's type export name differs across setups; alias the few we use.
@@ -40,21 +45,116 @@ export interface VibzChoreographyStudioProps {
   spotifyClientId?: string;
 }
 
-const STYLE_OPTIONS: Array<[number, string]> = [
-  [0, 'On'], [1, 'Off'], [2, 'Strobe'], [3, 'Wave'], [4, 'PW'], [5, 'Heartbeat'],
-  [6, 'Sparkle'], [7, 'Pulse'], [8, 'Random'], [9, 'ACC_ON'], [10, 'ACC_ON_XYZ'],
-  [11, 'ACC_CLAP'], [13, 'ACC_FLASH'], [14, 'Clear'], [15, 'ACC_HOLO'], [16, 'Boom'],
-  [17, 'ACC_POS_X_PN'], [18, 'ACC_POS_Y_PN'], [19, 'ACC_POS_Z_PN'],
-  [20, 'ACC_POS_X_P'], [21, 'ACC_POS_Y_P'], [22, 'ACC_POS_Z_P'],
-  [23, 'ACC_POS_X_N'], [24, 'ACC_POS_Y_N'], [25, 'ACC_POS_Z_N'],
-  [26, 'ACC_MVNT_X_PN'], [27, 'ACC_MVNT_Y_PN'], [28, 'ACC_MVNT_Z_PN'],
-  [29, 'ACC_MVNT_X_P'], [30, 'ACC_MVNT_Y_P'], [31, 'ACC_MVNT_Z_P'],
-  [32, 'ACC_MVNT_X_N'], [33, 'ACC_MVNT_Y_N'], [34, 'ACC_MVNT_Z_N'],
-  [35, 'Blind'], [36, 'Wave_Rnd'],
-];
+// Available effects, derived from the firmware `Style` enum (Identifiers.Styles,
+// itself a mirror of wristband_objects/Event.h) so the picker can never drift
+// from what the device actually supports. Sorted by style id.
+const STYLE_OPTIONS: Array<[number, string]> = (
+  Object.entries(Styles) as Array<[string, number]>
+)
+  .map(([name, value]): [number, string] => [value, name])
+  .sort((a, b) => a[0] - b[0]);
 const BLEND_OPTIONS: Array<[number, string]> = [
   [0, 'Normal'], [1, 'Add'], [2, 'And'], [3, 'Subtract'], [4, 'Multiply'], [5, 'Divide'],
 ];
+
+// Addressable LED-strip effect styles, derived from StripStyles (mirror of the
+// firmware `Style_strip` enum). Sorted by id.
+const STRIP_STYLE_OPTIONS: Array<[number, string]> = (
+  Object.entries(StripStyles) as Array<[string, number]>
+)
+  .map(([name, value]): [number, string] => [value, name])
+  .sort((a, b) => a[0] - b[0]);
+
+/**
+ * Per-style layout of an `EffectStrip`'s 8 generic params, from the firmware
+ * doc (wristband_firmware/Doc/strip_effects.md). `color` groups an R,G,B triplet
+ * into one picker; `num` is a single 0–255 byte. Params not listed default to 0.
+ */
+type StripParamSpec =
+  | { kind: 'color'; label: string; idx: readonly [number, number, number] }
+  | { kind: 'num'; label: string; idx: number };
+
+const STRIP_PARAM_SPECS: Record<number, StripParamSpec[]> = {
+  [StripStyles.Off]: [],
+  [StripStyles.ColorSweep]: [
+    { kind: 'color', label: 'Left color', idx: [0, 1, 2] },
+    { kind: 'color', label: 'Right color', idx: [3, 4, 5] },
+    { kind: 'num', label: 'Intensity', idx: 6 },
+    { kind: 'num', label: 'Speed', idx: 7 },
+  ],
+  [StripStyles.Comet]: [
+    { kind: 'color', label: 'Color', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Speed', idx: 4 },
+    { kind: 'num', label: 'Trail length (1–26)', idx: 5 },
+  ],
+  [StripStyles.DoubleSpin]: [
+    { kind: 'color', label: 'Point 1', idx: [0, 1, 2] },
+    { kind: 'color', label: 'Point 2', idx: [3, 4, 5] },
+    { kind: 'num', label: 'Intensity', idx: 6 },
+    { kind: 'num', label: 'Speed', idx: 7 },
+  ],
+  [StripStyles.ImpactWave]: [
+    { kind: 'color', label: 'Color', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Speed', idx: 4 },
+    { kind: 'num', label: 'Kick duration (×10ms)', idx: 5 },
+  ],
+  [StripStyles.KittWide]: [
+    { kind: 'color', label: 'Beam color', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Speed', idx: 4 },
+    { kind: 'num', label: 'Beam width', idx: 5 },
+  ],
+  [StripStyles.PulseBeat]: [
+    { kind: 'color', label: 'Flash 1', idx: [0, 1, 2] },
+    { kind: 'color', label: 'Flash 2', idx: [3, 4, 5] },
+    { kind: 'num', label: 'Intensity', idx: 6 },
+    { kind: 'num', label: 'Speed (BPM)', idx: 7 },
+  ],
+  [StripStyles.RainbowComet]: [
+    { kind: 'num', label: 'Intensity', idx: 0 },
+    { kind: 'num', label: 'Speed', idx: 1 },
+    { kind: 'num', label: 'Trail length (1–26)', idx: 2 },
+    { kind: 'num', label: 'Color speed', idx: 3 },
+  ],
+  [StripStyles.Shimmer]: [
+    { kind: 'color', label: 'Background', idx: [0, 1, 2] },
+    { kind: 'color', label: 'Sparkle', idx: [3, 4, 5] },
+    { kind: 'num', label: 'Intensity', idx: 6 },
+    { kind: 'num', label: 'Chance', idx: 7 },
+  ],
+  [StripStyles.VuMeter]: [
+    { kind: 'color', label: 'Peak color (reserved)', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Left level', idx: 4 },
+    { kind: 'num', label: 'Right level', idx: 5 },
+  ],
+  [StripStyles.VuMeterPeak]: [
+    { kind: 'color', label: 'Peak color', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Left level', idx: 4 },
+    { kind: 'num', label: 'Right level', idx: 5 },
+  ],
+  [StripStyles.Direction]: [
+    { kind: 'color', label: 'Center color', idx: [0, 1, 2] },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'Direction (0–25)', idx: 4 },
+    { kind: 'num', label: 'Beam width', idx: 5 },
+    { kind: 'num', label: 'Edge R', idx: 6 },
+    { kind: 'num', label: 'Edge G', idx: 7 },
+  ],
+  [StripStyles.DirectionDyn]: [
+    { kind: 'color', label: 'Particle 1', idx: [0, 1, 2] },
+    { kind: 'color', label: 'Particle 2', idx: [3, 4, 5] },
+    { kind: 'num', label: 'Intensity', idx: 6 },
+    { kind: 'num', label: 'Direction (0–25)', idx: 7 },
+  ],
+  [StripStyles.Battery]: [
+    { kind: 'num', label: 'Intensity', idx: 0 },
+    { kind: 'num', label: 'Battery level', idx: 1 },
+  ],
+};
 
 const fmtTime = (s: number) => {
   if (!Number.isFinite(s)) s = 0;
@@ -64,6 +164,7 @@ const fmtTime = (s: number) => {
 const clampN = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const snap = (s: number) => Math.round(s * 20) / 20; // 0.05 s grid
 const round3 = (n: number) => Math.round(n * 1000) / 1000; // ms precision for time fields
+const num = (v: string) => Number(v) || 0;
 
 /**
  * True when an [r,g,b,…] block colour is dark enough that black text/strokes
@@ -81,17 +182,31 @@ function emptyModel(): Choreography {
 
 function newEvent(id: string, start: number): ChoreographyEvent {
   return {
+    kind: 'effect',
     id,
     start, // caller snaps (grid-aware) before constructing
     duration: 1,
     mask: 0,
     layer: { nbr: 0, opacity: 255, blendingMode: 1 },
-    effect: { style: 7, frequency: 10, duration: 100, color: [255, 0, 0, 0, 0], intensity: 255 },
+    effect: { style: Styles.Sparkle, frequency: 10, duration: 100, color: [255, 0, 0, 0, 0], intensity: 255 },
+  };
+}
+
+function newStripEvent(id: string, start: number): ChoreographyEvent {
+  return {
+    kind: 'strip',
+    id,
+    start, // caller snaps (grid-aware) before constructing
+    duration: 1,
+    mask: 0,
+    layer: { nbr: 0, opacity: 255, blendingMode: 1 },
+    // Default to a visible Comet (white, mid speed, trail 10).
+    strip: { style: StripStyles.Comet, params: [255, 255, 255, 255, 4, 10, 0, 0] },
   };
 }
 
 /** Promote a constant intensity to a 2-point envelope so points can be edited. */
-function asKeyframes(i: ChoreographyEvent['effect']['intensity']): IntensityKeyframe[] {
+function asKeyframes(i: ChoreographyEffect['intensity']): IntensityKeyframe[] {
   if (Array.isArray(i)) return i;
   return [{ at: 0, value: i }, { at: 1, value: i }];
 }
@@ -1016,63 +1131,76 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                   <span className="vz-lane-label">Layer {ln}</span>
                   {model.events
                     .filter((ev) => ev.layer.nbr === ln)
-                    .map((ev) => (
-                      <div
-                        key={ev.id}
-                        className={`vz-ev ${ev.id === selId ? 'sel' : ''}`}
-                        style={{
-                          left: ev.start * pps,
-                          width: Math.max(6, ev.duration * pps),
-                          background: `rgb(${ev.effect.color[0]},${ev.effect.color[1]},${ev.effect.color[2]})`,
-                          color: isDarkBg(ev.effect.color) ? '#f4f5f7' : '#0a0a0a',
-                          borderColor: isDarkBg(ev.effect.color)
-                            ? 'rgba(255,255,255,0.55)'
-                            : 'rgba(0,0,0,0.45)',
-                        }}
-                        onPointerDown={(e) => onEvPointerDown(e, ev, 'move')}
-                        onPointerMove={onEvPointerMove}
-                        onPointerUp={onEvPointerUp}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setSelId(ev.id);
-                          setMenu({ x: e.clientX, y: e.clientY, evId: ev.id });
-                        }}
-                        onDoubleClick={(e) => {
-                          const r = e.currentTarget.getBoundingClientRect();
-                          const at = clampN((e.clientX - r.left) / r.width, 0, 1);
-                          const value = Math.round(
-                            clampN(255 * (1 - (e.clientY - r.top) / r.height), 0, 255)
-                          );
-                          patch(ev.id, (x) => {
-                            const ks = asKeyframes(x.effect.intensity)
-                              .concat({ at, value })
-                              .sort((a, b) => a.at - b.at);
-                            return { ...x, effect: { ...x.effect, intensity: ks } };
-                          });
-                        }}
-                      >
-                        <span
-                          className="grip l"
-                          onPointerDown={(e) => onEvPointerDown(e, ev, 'l')}
+                    .map((ev) => {
+                      const w = Math.max(6, ev.duration * pps);
+                      // Strip events have no single colour — use a fixed accent.
+                      const dark = isStripEvent(ev) ? true : isDarkBg(ev.effect.color);
+                      const bg = isStripEvent(ev)
+                        ? '#3a2f6e'
+                        : `rgb(${ev.effect.color[0]},${ev.effect.color[1]},${ev.effect.color[2]})`;
+                      const label = isStripEvent(ev)
+                        ? `🎏 ${STRIP_STYLE_OPTIONS.find(([v]) => v === ev.strip.style)?.[1] ?? ev.strip.style}`
+                        : STYLE_OPTIONS.find(([v]) => v === ev.effect.style)?.[1] ?? ev.effect.style;
+                      return (
+                        <div
+                          key={ev.id}
+                          className={`vz-ev ${ev.id === selId ? 'sel' : ''}`}
+                          style={{
+                            left: ev.start * pps,
+                            width: w,
+                            background: bg,
+                            color: dark ? '#f4f5f7' : '#0a0a0a',
+                            borderColor: dark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)',
+                          }}
+                          onPointerDown={(e) => onEvPointerDown(e, ev, 'move')}
                           onPointerMove={onEvPointerMove}
                           onPointerUp={onEvPointerUp}
-                        />
-                        {STYLE_OPTIONS.find(([v]) => v === ev.effect.style)?.[1] ?? ev.effect.style}
-                        <EnvelopeOverlay
-                          ev={ev}
-                          width={Math.max(6, ev.duration * pps)}
-                          stroke={isDarkBg(ev.effect.color) ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.7)'}
-                          onChange={(fn) => patch(ev.id, fn)}
-                        />
-                        <span
-                          className="grip r"
-                          onPointerDown={(e) => onEvPointerDown(e, ev, 'r')}
-                          onPointerMove={onEvPointerMove}
-                          onPointerUp={onEvPointerUp}
-                        />
-                      </div>
-                    ))}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelId(ev.id);
+                            setMenu({ x: e.clientX, y: e.clientY, evId: ev.id });
+                          }}
+                          onDoubleClick={(e) => {
+                            if (isStripEvent(ev)) return; // strip has no intensity envelope
+                            const r = e.currentTarget.getBoundingClientRect();
+                            const at = clampN((e.clientX - r.left) / r.width, 0, 1);
+                            const value = Math.round(
+                              clampN(255 * (1 - (e.clientY - r.top) / r.height), 0, 255)
+                            );
+                            patch(ev.id, (x) => {
+                              const ex = x as ChoreographyEffectEvent;
+                              const ks = asKeyframes(ex.effect.intensity)
+                                .concat({ at, value })
+                                .sort((a, b) => a.at - b.at);
+                              return { ...ex, effect: { ...ex.effect, intensity: ks } };
+                            });
+                          }}
+                        >
+                          <span
+                            className="grip l"
+                            onPointerDown={(e) => onEvPointerDown(e, ev, 'l')}
+                            onPointerMove={onEvPointerMove}
+                            onPointerUp={onEvPointerUp}
+                          />
+                          {label}
+                          {!isStripEvent(ev) && (
+                            <EnvelopeOverlay
+                              ev={ev}
+                              width={w}
+                              stroke={isDarkBg(ev.effect.color) ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.7)'}
+                              onChange={(fn) => patch(ev.id, fn)}
+                            />
+                          )}
+                          <span
+                            className="grip r"
+                            onPointerDown={(e) => onEvPointerDown(e, ev, 'r')}
+                            onPointerMove={onEvPointerMove}
+                            onPointerUp={onEvPointerUp}
+                          />
+                        </div>
+                      );
+                    })}
                 </div>
               ))}
 
@@ -1148,7 +1276,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
  * point to remove it (≥2 kept). Double-click the block adds a point.
  */
 function EnvelopeOverlay(props: {
-  ev: ChoreographyEvent;
+  ev: ChoreographyEffectEvent;
   /** Block pixel width — ties the curve geometry to resizes (see below). */
   width: number;
   /** Curve colour, contrast-matched to the block background by the caller. */
@@ -1172,15 +1300,17 @@ function EnvelopeOverlay(props: {
 
   const setKf = (idx: number, at: number, value: number) =>
     onChange((x) => {
-      const ks = (x.effect.intensity as IntensityKeyframe[]).map((k) => ({ ...k }));
+      const e = x as ChoreographyEffectEvent;
+      const ks = (e.effect.intensity as IntensityKeyframe[]).map((k) => ({ ...k }));
       ks[idx] = { ...ks[idx], at, value };
-      return { ...x, effect: { ...x.effect, intensity: ks } };
+      return { ...e, effect: { ...e.effect, intensity: ks } };
     });
   const removeKf = (idx: number) =>
     onChange((x) => {
-      const arr = x.effect.intensity;
-      if (!Array.isArray(arr) || arr.length <= 2) return x;
-      return { ...x, effect: { ...x.effect, intensity: arr.filter((_, i) => i !== idx) } };
+      const e = x as ChoreographyEffectEvent;
+      const arr = e.effect.intensity;
+      if (!Array.isArray(arr) || arr.length <= 2) return e;
+      return { ...e, effect: { ...e.effect, intensity: arr.filter((_, i) => i !== idx) } };
     });
 
   return (
@@ -1258,27 +1388,18 @@ function EventForm(props: {
   onDelete: () => void;
 }) {
   const { ev, onChange } = props;
-  const isRamp = Array.isArray(ev.effect.intensity);
-  const ramp = isRamp ? (ev.effect.intensity as Array<{ at: number; value: number }>) : null;
-  const constVal = isRamp ? 255 : (ev.effect.intensity as number);
-
-  const setFx = (k: string, v: number) =>
-    onChange((e) => ({ ...e, effect: { ...e.effect, [k]: v } }));
   const setLayer = (k: string, v: number) =>
     onChange((e) => ({ ...e, layer: { ...e.layer, [k]: v } }));
-  const setColor = (i: number, v: number) =>
-    onChange((e) => {
-      const c = [...e.effect.color] as ChoreographyEvent['effect']['color'];
-      c[i] = clampN(v || 0, 0, 255);
-      return { ...e, effect: { ...e.effect, color: c } };
+  // Convert the event in place between a regular effect and an LED-strip effect.
+  // Shared fields (start/duration/mask/layer) are kept; the effect/strip payload
+  // resets to its type default (the two have different parameter models).
+  const convertTo = (target: 'effect' | 'strip') =>
+    onChange((x) => {
+      const cur = isStripEvent(x) ? 'strip' : 'effect';
+      if (cur === target) return x;
+      const fresh = target === 'strip' ? newStripEvent(x.id, x.start) : newEvent(x.id, x.start);
+      return { ...fresh, duration: x.duration, mask: x.mask, layer: x.layer };
     });
-  const num = (v: string) => Number(v) || 0;
-  const hex =
-    '#' +
-    ev.effect.color
-      .slice(0, 3)
-      .map((n) => n.toString(16).padStart(2, '0'))
-      .join('');
 
   return (
     <div className="vz-right">
@@ -1324,96 +1445,222 @@ function EventForm(props: {
       </div>
 
       <div className="vz-sec">
-        <h4>Effect</h4>
-        <div className="vz-field">
-          <label>Style</label>
-          <select value={ev.effect.style} onChange={(e) => setFx('style', num(e.target.value))}>
-            {STYLE_OPTIONS.map(([v, n]) => <option key={v} value={v}>{n} ({v})</option>)}
-          </select>
+        <div className="vz-row vz-sec-head">
+          <h4>{isStripEvent(ev) ? 'LED strip effect' : 'Effect'}</h4>
+          <span className="vz-evtype" title="Event type">
+            <button className={!isStripEvent(ev) ? 'on' : ''} onClick={() => convertTo('effect')}>
+              💡 Effect
+            </button>
+            <button className={isStripEvent(ev) ? 'on' : ''} onClick={() => convertTo('strip')}>
+              🎏 Strip
+            </button>
+          </span>
         </div>
-        <div className="vz-row">
-          <div className="vz-field">
-            <label>Frequency</label>
-            <input type="number" min={0} max={255} value={ev.effect.frequency}
-              onChange={(e) => setFx('frequency', clampN(num(e.target.value), 0, 255))} />
-          </div>
-          <div className="vz-field">
-            <label>Eff. duration</label>
-            <input type="number" min={0} max={255} value={ev.effect.duration}
-              onChange={(e) => setFx('duration', clampN(num(e.target.value), 0, 255))} />
-          </div>
-        </div>
-
-        <div className="vz-field">
-          <label>Color</label>
-          <div className="vz-color-grid">
-            {['R', 'G', 'B', 'W', 'V'].map((n, i) => (
-              <div key={n}>
-                <label>{n}</label>
-                <input type="number" min={0} max={255} value={ev.effect.color[i]}
-                  onChange={(e) => setColor(i, num(e.target.value))} />
-              </div>
-            ))}
-          </div>
-          <div className="vz-row" style={{ alignItems: 'center' }}>
-            <input type="color" value={hex}
-              onChange={(e) => {
-                const v = e.target.value;
-                setColor(0, parseInt(v.slice(1, 3), 16));
-                setColor(1, parseInt(v.slice(3, 5), 16));
-                setColor(2, parseInt(v.slice(5, 7), 16));
-              }} />
-            <div className="vz-swatch" style={{ background: `rgb(${ev.effect.color.slice(0, 3).join(',')})` }} />
-          </div>
-        </div>
-
-        <div className="vz-field">
-          <label>Intensity</label>
-          <div className="vz-row">
-            <label><input type="radio" style={{ width: 'auto', marginRight: 6 }}
-              checked={!isRamp} onChange={() => setFx('intensity', constVal as number)} />Constant</label>
-            <label><input type="radio" style={{ width: 'auto', marginRight: 6 }}
-              checked={isRamp}
-              onChange={() => onChange((e) => ({
-                ...e,
-                effect: { ...e.effect, intensity: [{ at: 0, value: constVal }, { at: 1, value: 255 }] },
-              }))} />Ramp</label>
-          </div>
-          {!isRamp ? (
-            <input type="range" min={0} max={255} value={constVal}
-              onChange={(e) => setFx('intensity', num(e.target.value))} />
-          ) : (
-            <>
-              <div className="vz-row">
-                <div className="vz-field">
-                  <label>From {ramp![0].value}</label>
-                  <input type="range" min={0} max={255} value={ramp![0].value}
-                    onChange={(e) => onChange((x) => {
-                      const ks = (x.effect.intensity as Array<{ at: number; value: number }>).map((k) => ({ ...k }));
-                      ks[0] = { ...ks[0], value: num(e.target.value) };
-                      return { ...x, effect: { ...x.effect, intensity: ks } };
-                    })} />
-                </div>
-                <div className="vz-field">
-                  <label>To {ramp![ramp!.length - 1].value}</label>
-                  <input type="range" min={0} max={255} value={ramp![ramp!.length - 1].value}
-                    onChange={(e) => onChange((x) => {
-                      const ks = (x.effect.intensity as Array<{ at: number; value: number }>).map((k) => ({ ...k }));
-                      ks[ks.length - 1] = { ...ks[ks.length - 1], value: num(e.target.value) };
-                      return { ...x, effect: { ...x.effect, intensity: ks } };
-                    })} />
-                </div>
-              </div>
-              <p className="vz-hint">
-                {ramp!.length} points — drag on the block, double-click to add,
-                right/Alt-click to remove.
-              </p>
-            </>
-          )}
-        </div>
+        {isStripEvent(ev) ? (
+          <StripSection ev={ev} onChange={onChange} />
+        ) : (
+          <EffectSection ev={ev} onChange={onChange} />
+        )}
       </div>
 
       <button className="danger" onClick={props.onDelete}>🗑 Delete event</button>
     </div>
+  );
+}
+
+function EffectSection(props: {
+  ev: ChoreographyEffectEvent;
+  onChange: (fn: (e: ChoreographyEvent) => ChoreographyEvent) => void;
+}) {
+  const { ev, onChange } = props;
+  const isRamp = Array.isArray(ev.effect.intensity);
+  const ramp = isRamp ? (ev.effect.intensity as Array<{ at: number; value: number }>) : null;
+  const constVal = isRamp ? 255 : (ev.effect.intensity as number);
+
+  const setFx = (k: string, v: number) =>
+    onChange((x) => {
+      const e = x as ChoreographyEffectEvent;
+      return { ...e, effect: { ...e.effect, [k]: v } };
+    });
+  const setColor = (i: number, v: number) =>
+    onChange((x) => {
+      const e = x as ChoreographyEffectEvent;
+      const c = [...e.effect.color] as ChoreographyEffect['color'];
+      c[i] = clampN(v || 0, 0, 255);
+      return { ...e, effect: { ...e.effect, color: c } };
+    });
+  const hex =
+    '#' +
+    ev.effect.color
+      .slice(0, 3)
+      .map((n) => n.toString(16).padStart(2, '0'))
+      .join('');
+
+  return (
+    <>
+      <div className="vz-field">
+        <label>Style</label>
+        <select value={ev.effect.style} onChange={(e) => setFx('style', num(e.target.value))}>
+          {STYLE_OPTIONS.map(([v, n]) => <option key={v} value={v}>{n} ({v})</option>)}
+        </select>
+      </div>
+      <div className="vz-row">
+        <div className="vz-field">
+          <label>Frequency</label>
+          <input type="number" min={0} max={255} value={ev.effect.frequency}
+            onChange={(e) => setFx('frequency', clampN(num(e.target.value), 0, 255))} />
+        </div>
+        <div className="vz-field">
+          <label>Eff. duration</label>
+          <input type="number" min={0} max={255} value={ev.effect.duration}
+            onChange={(e) => setFx('duration', clampN(num(e.target.value), 0, 255))} />
+        </div>
+      </div>
+
+      <div className="vz-field">
+        <label>Color</label>
+        <div className="vz-color-grid">
+          {['R', 'G', 'B', 'W', 'V'].map((n, i) => (
+            <div key={n}>
+              <label>{n}</label>
+              <input type="number" min={0} max={255} value={ev.effect.color[i]}
+                onChange={(e) => setColor(i, num(e.target.value))} />
+            </div>
+          ))}
+        </div>
+        <div className="vz-row" style={{ alignItems: 'center' }}>
+          <input type="color" value={hex}
+            onChange={(e) => {
+              const v = e.target.value;
+              setColor(0, parseInt(v.slice(1, 3), 16));
+              setColor(1, parseInt(v.slice(3, 5), 16));
+              setColor(2, parseInt(v.slice(5, 7), 16));
+            }} />
+          <div className="vz-swatch" style={{ background: `rgb(${ev.effect.color.slice(0, 3).join(',')})` }} />
+        </div>
+      </div>
+
+      <div className="vz-field">
+        <label>Intensity</label>
+        <div className="vz-row">
+          <label><input type="radio" style={{ width: 'auto', marginRight: 6 }}
+            checked={!isRamp} onChange={() => setFx('intensity', constVal as number)} />Constant</label>
+          <label><input type="radio" style={{ width: 'auto', marginRight: 6 }}
+            checked={isRamp}
+            onChange={() => onChange((x) => {
+              const e = x as ChoreographyEffectEvent;
+              return {
+                ...e,
+                effect: { ...e.effect, intensity: [{ at: 0, value: constVal }, { at: 1, value: 255 }] },
+              };
+            })} />Ramp</label>
+        </div>
+        {!isRamp ? (
+          <input type="range" min={0} max={255} value={constVal}
+            onChange={(e) => setFx('intensity', num(e.target.value))} />
+        ) : (
+          <>
+            <div className="vz-row">
+              <div className="vz-field">
+                <label>From {ramp![0].value}</label>
+                <input type="range" min={0} max={255} value={ramp![0].value}
+                  onChange={(e) => onChange((x) => {
+                    const en = x as ChoreographyEffectEvent;
+                    const ks = (en.effect.intensity as Array<{ at: number; value: number }>).map((k) => ({ ...k }));
+                    ks[0] = { ...ks[0], value: num(e.target.value) };
+                    return { ...en, effect: { ...en.effect, intensity: ks } };
+                  })} />
+              </div>
+              <div className="vz-field">
+                <label>To {ramp![ramp!.length - 1].value}</label>
+                <input type="range" min={0} max={255} value={ramp![ramp!.length - 1].value}
+                  onChange={(e) => onChange((x) => {
+                    const en = x as ChoreographyEffectEvent;
+                    const ks = (en.effect.intensity as Array<{ at: number; value: number }>).map((k) => ({ ...k }));
+                    ks[ks.length - 1] = { ...ks[ks.length - 1], value: num(e.target.value) };
+                    return { ...en, effect: { ...en.effect, intensity: ks } };
+                  })} />
+              </div>
+            </div>
+            <p className="vz-hint">
+              {ramp!.length} points — drag on the block, double-click to add,
+              right/Alt-click to remove.
+            </p>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function StripSection(props: {
+  ev: ChoreographyStripEvent;
+  onChange: (fn: (e: ChoreographyEvent) => ChoreographyEvent) => void;
+}) {
+  const { ev, onChange } = props;
+  const specs = STRIP_PARAM_SPECS[ev.strip.style] ?? [];
+
+  const setStyle = (style: number) =>
+    onChange((x) => {
+      const e = x as ChoreographyStripEvent;
+      return { ...e, strip: { ...e.strip, style } };
+    });
+  const setParam = (i: number, v: number) =>
+    onChange((x) => {
+      const e = x as ChoreographyStripEvent;
+      const params = [...e.strip.params];
+      params[i] = clampN(v || 0, 0, 255);
+      return { ...e, strip: { ...e.strip, params } };
+    });
+  const setColorParams = (idx: readonly [number, number, number], hexVal: string) =>
+    onChange((x) => {
+      const e = x as ChoreographyStripEvent;
+      const params = [...e.strip.params];
+      params[idx[0]] = parseInt(hexVal.slice(1, 3), 16);
+      params[idx[1]] = parseInt(hexVal.slice(3, 5), 16);
+      params[idx[2]] = parseInt(hexVal.slice(5, 7), 16);
+      return { ...e, strip: { ...e.strip, params } };
+    });
+  const hexOf = (idx: readonly [number, number, number]) =>
+    '#' + idx.map((i) => (ev.strip.params[i] ?? 0).toString(16).padStart(2, '0')).join('');
+
+  return (
+    <>
+      <div className="vz-field">
+        <label>Style</label>
+        <select value={ev.strip.style} onChange={(e) => setStyle(num(e.target.value))}>
+          {STRIP_STYLE_OPTIONS.map(([v, n]) => <option key={v} value={v}>{n} ({v})</option>)}
+        </select>
+      </div>
+
+      {specs.length === 0 ? (
+        <p className="vz-hint">This style reads no parameters.</p>
+      ) : (
+        specs.map((spec) =>
+          spec.kind === 'color' ? (
+            <div className="vz-field" key={spec.label}>
+              <label>{spec.label}</label>
+              <div className="vz-row" style={{ alignItems: 'center' }}>
+                <input type="color" value={hexOf(spec.idx)}
+                  onChange={(e) => setColorParams(spec.idx, e.target.value)} />
+                <div className="vz-swatch" style={{ background: hexOf(spec.idx) }} />
+                <span className="vz-hint" style={{ marginLeft: 'auto' }}>
+                  {spec.idx.map((i) => ev.strip.params[i] ?? 0).join(', ')}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="vz-field" key={spec.label}>
+              <label>{spec.label} — {ev.strip.params[spec.idx] ?? 0}</label>
+              <input type="range" min={0} max={255} value={ev.strip.params[spec.idx] ?? 0}
+                onChange={(e) => setParam(spec.idx, num(e.target.value))} />
+            </div>
+          )
+        )
+      )}
+      <p className="vz-hint">
+        Params follow the firmware strip-effects spec; bytes not shown stay 0.
+      </p>
+    </>
   );
 }

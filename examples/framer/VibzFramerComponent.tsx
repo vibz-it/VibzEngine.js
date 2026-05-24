@@ -58,14 +58,14 @@ export function VibzTest(props) {
 
         // Create a simple test event
         const evt = new Event()
-        evt.effect.style = 7 // Pulse
+        evt.effect.style = 6 // Sparkle
         evt.effect.color = [0, 0, 255, 0, 0] // Blue
         evt.effect.duration = 0 // Infinite
         evt.layer.opacity = 255
 
         // Send as event_1
         controllerRef.current.playEvent("event_1", evt)
-        console.log("Sent Event: Pulse Blue")
+        console.log("Sent Event: Sparkle Blue")
     }
 
     return (
@@ -87,7 +87,7 @@ export function VibzTest(props) {
                 onClick={handleSendEvent}
                 disabled={!isConnected}
             >
-                Send Blue Pulse
+                Send Blue Sparkle
             </button>
         </div>
     )

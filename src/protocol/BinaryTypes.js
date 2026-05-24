@@ -75,7 +75,7 @@ export class Layer {
  */
 export class Effect {
     constructor() {
-        this.style = 0; // Off
+        this.style = 0; // On (Styles.On)
         this.frequency = 0;
         this.duration = 0;
         this.intensity = 0;
@@ -156,6 +156,64 @@ export class Event {
 
         builder.appendUint16(this.localization.lat);
         builder.appendUint16(this.localization.lon);
+
+        // Verification Code
+        builder.appendUint8(Identifiers.VERIF_CODE);
+
+        return builder.getBuffer();
+    }
+}
+
+/**
+ * Strip Effect Structure — for the addressable LED strip (WS2812B).
+ * 8 generic params whose meaning depends on `styleStrip` (see StripStyles).
+ */
+export class EffectStrip {
+    constructor() {
+        this.styleStrip = 0; // StripStyles.Off
+        this.params = [0, 0, 0, 0, 0, 0, 0, 0]; // 8 bytes, style-dependent
+    }
+}
+
+/**
+ * Event for the addressable LED strip (object 0x0110). Carries an EffectStrip
+ * instead of an Effect. Shares the send-path contract with Event
+ * (startTime / stopTime / autoExtend / encode) so the controller and
+ * EventManager drive it identically. Unlike Event there is no targetUid, and
+ * the `id` byte IS serialized.
+ */
+export class EventStrip {
+    constructor() {
+        this.id = 0; // serialized id_ byte
+        this.mask = 0;
+        this.startTime = 0; // Relative time ms (int32)
+        this.stopTime = 0; // Relative time ms (int32)
+        // See Event.autoExtend — same keep-alive semantics. NOT serialized.
+        this.autoExtend = true;
+        this.layer = new Layer();
+        this.effectStrip = new EffectStrip();
+    }
+
+    encode() {
+        const builder = new BufferBuilder();
+
+        builder.appendUint16(Identifiers.OBJECT_ID_EVENT_STRIP_V0);
+        builder.appendUint8(this.id);
+        builder.appendUint8(this.mask);
+
+        builder.appendInt32(this.startTime);
+        builder.appendInt32(this.stopTime);
+
+        // Layer
+        builder.appendUint8(this.layer.blendingMode);
+        builder.appendUint8(this.layer.nbr);
+        builder.appendUint8(this.layer.opacity);
+
+        // Strip effect: style byte + 8 generic params
+        builder.appendUint8(this.effectStrip.styleStrip);
+        for (let i = 0; i < 8; i++) {
+            builder.appendUint8(this.effectStrip.params[i] ?? 0);
+        }
 
         // Verification Code
         builder.appendUint8(Identifiers.VERIF_CODE);

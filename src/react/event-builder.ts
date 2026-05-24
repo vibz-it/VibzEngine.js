@@ -1,4 +1,4 @@
-import { Event as VibzEvent } from '../protocol/BinaryTypes.js';
+import { Event as VibzEvent, EventStrip } from '../protocol/BinaryTypes.js';
 
 export type ColorRGB = readonly [r: number, g: number, b: number];
 export type ColorRGBW = readonly [r: number, g: number, b: number, w: number];
@@ -6,7 +6,7 @@ export type ColorRGBWV = readonly [r: number, g: number, b: number, w: number, v
 export type Color = ColorRGB | ColorRGBW | ColorRGBWV;
 
 export interface EffectDescriptor {
-  /** Style id from `Styles` (e.g. Styles.Pulse). */
+  /** Style id from `Styles` (e.g. Styles.Sparkle). */
   style?: number;
   /** Color tuple. Missing channels default to 0. */
   color?: Color;
@@ -72,6 +72,55 @@ export function buildEvent(desc: EventDescriptor): VibzEvent {
   if (fx.color) {
     const [r, g, b, w = 0, vib = 0] = fx.color;
     evt.effect.color = [r, g, b, w, vib];
+  }
+
+  if (desc.layer) {
+    if (desc.layer.nbr !== undefined) evt.layer.nbr = desc.layer.nbr;
+    if (desc.layer.opacity !== undefined) evt.layer.opacity = desc.layer.opacity;
+    if (desc.layer.blendingMode !== undefined) evt.layer.blendingMode = desc.layer.blendingMode;
+  }
+
+  return evt;
+}
+
+export interface StripEffectDescriptor {
+  /** Style id from `StripStyles` (e.g. StripStyles.ColorSweep). */
+  style?: number;
+  /** Up to 8 generic params (0–255). Missing entries default to 0. */
+  params?: readonly number[];
+}
+
+export interface StripEventDescriptor {
+  effect: StripEffectDescriptor;
+  layer?: LayerDescriptor;
+  /** Routing mask. */
+  mask?: number;
+  /** Serialized id_ byte. Default 0. */
+  id?: number;
+  /** Relative start time in ms (device clock = Date.now() - referenceTime). */
+  startTime?: number;
+  /** Relative stop time in ms. */
+  stopTime?: number;
+  /** See {@link EventDescriptor.autoExtend}. Default true. */
+  autoExtend?: boolean;
+}
+
+/**
+ * Build an `EventStrip` (addressable LED-strip event, object 0x0110) from a
+ * plain descriptor. Mirrors {@link buildEvent} for the strip object. Pure.
+ */
+export function buildStripEvent(desc: StripEventDescriptor): EventStrip {
+  const evt = new EventStrip();
+
+  if (desc.mask !== undefined) evt.mask = desc.mask;
+  if (desc.id !== undefined) evt.id = desc.id;
+  if (desc.startTime !== undefined) evt.startTime = desc.startTime;
+  if (desc.stopTime !== undefined) evt.stopTime = desc.stopTime;
+  if (desc.autoExtend !== undefined) evt.autoExtend = desc.autoExtend;
+
+  if (desc.effect.style !== undefined) evt.effectStrip.styleStrip = desc.effect.style;
+  if (desc.effect.params) {
+    for (let i = 0; i < 8; i++) evt.effectStrip.params[i] = desc.effect.params[i] ?? 0;
   }
 
   if (desc.layer) {

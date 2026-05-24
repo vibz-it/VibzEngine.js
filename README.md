@@ -94,7 +94,7 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
 // 3. Create and Send Event
 function sendLight() {
     const evt = new Event();
-    evt.effect.style = Styles.Pulse;
+    evt.effect.style = Styles.Heartbeat;
     evt.effect.color = [255, 0, 0, 0, 0]; // Red
     evt.effect.intensity = 255;
     
@@ -153,7 +153,7 @@ function ConnectButton() {
 function PulseButton() {
   return (
     <VibzButton event={{
-      effect: { style: Styles.Pulse, color: [255, 49, 75], frequency: 2 },
+      effect: { style: Styles.Heartbeat, color: [255, 49, 75], frequency: 2 },
     }}>
       {({ ref, handlers, state }) => (
         <button

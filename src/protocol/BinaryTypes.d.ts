@@ -55,6 +55,28 @@ export class Event {
   encode(): Uint8Array;
 }
 
+export class EffectStrip {
+  /** StripStyles value. */
+  styleStrip: number;
+  /** 8 generic uint8 params (0–255), meaning depends on `styleStrip`. */
+  params: number[];
+}
+
+export class EventStrip {
+  /** Serialized id_ byte. */
+  id: number;
+  mask: number;
+  /** Relative time in ms (int32) */
+  startTime: number;
+  /** Relative time in ms (int32) */
+  stopTime: number;
+  /** See {@link Event.autoExtend}. Default true. NOT serialized. */
+  autoExtend: boolean;
+  layer: Layer;
+  effectStrip: EffectStrip;
+  encode(): Uint8Array;
+}
+
 export class AbsoluteTime {
   timeUs: bigint;
   constructor(microseconds?: bigint | number);

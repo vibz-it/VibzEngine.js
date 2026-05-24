@@ -34,6 +34,11 @@ export const STUDIO_CSS = `
 .vz-timeline-tools{display:flex;gap:8px;padding:10px 16px;border-top:1px solid #1f2127;
   border-bottom:1px solid #1f2127;align-items:center;flex-wrap:wrap;}
 .vz-timeline-tools .grow{flex:1;}
+.vz-evtype{display:inline-flex;gap:0;border:1px solid #2a2d36;border-radius:6px;overflow:hidden;}
+.vz-evtype button{border:0;border-radius:0;background:#16181e;color:#9aa;padding:6px 10px;font-size:12px;}
+.vz-evtype button.on{background:#241c3f;color:#c3b3ff;}
+.vz-sec-head{justify-content:space-between;align-items:center;margin-bottom:8px;}
+.vz-sec-head h4{margin:0;}
 .vz-tl-scroll{flex:1;overflow:auto;min-height:0;padding:0 0 16px;}
 .vz-ruler{position:relative;height:24px;border-bottom:1px solid #23262e;
   background:#101218;font-size:10px;color:#778;min-width:100%;}

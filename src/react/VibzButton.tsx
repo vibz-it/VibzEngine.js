@@ -19,7 +19,7 @@ export interface VibzButtonProps extends UseVibzButtonOptions {
  * the consumer owns rendering and styling.
  *
  * @example
- * <VibzButton event={{ effect: { style: Styles.Pulse, color: [255, 49, 75] } }}>
+ * <VibzButton event={{ effect: { style: Styles.Heartbeat, color: [255, 49, 75] } }}>
  *   {({ ref, handlers, state }) => (
  *     <button ref={ref} {...handlers} disabled={!state.connected}>
  *       {state.pressed ? 'Pulsing…' : 'Press me'}

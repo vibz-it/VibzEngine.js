@@ -1,4 +1,4 @@
-import type { Event } from '../protocol/BinaryTypes.js';
+import type { Event, EventStrip } from '../protocol/BinaryTypes.js';
 
 export class VibzController {
   constructor();
@@ -7,7 +7,8 @@ export class VibzController {
   connect(): Promise<boolean>;
   disconnect(): Promise<void>;
   setOnDisconnect(callback: (() => void) | null): void;
-  playEvent(id: string, event: Event): void;
+  /** Schedule/refresh an event. Accepts a regular Event or a strip EventStrip. */
+  playEvent(id: string, event: Event | EventStrip): void;
   stopEvent(id: string): Promise<void>;
   setLogLevel(level: number): void;
 }

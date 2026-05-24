@@ -30,14 +30,19 @@ export {
   intensityAt,
   hasIntensityVariation,
   buildChoreographyEvent,
+  isStripEvent,
   styleName,
   blendingModeName,
+  stripStyleName,
   spotifyUriFromInput,
 } from './choreography.js';
 export type {
   Choreography,
   ChoreographyEvent,
+  ChoreographyEffectEvent,
+  ChoreographyStripEvent,
   ChoreographyEffect,
+  ChoreographyStripEffect,
   ChoreographyLayer,
   ChoreographyMedia,
   ChoreographyGrid,
@@ -48,11 +53,13 @@ export type {
 // Spotify playback (Web Playback SDK) bindings.
 export * from './spotify/index.js';
 
-export { buildEvent } from './event-builder.js';
+export { buildEvent, buildStripEvent } from './event-builder.js';
 export type {
   EventDescriptor,
   EffectDescriptor,
   LayerDescriptor,
+  StripEventDescriptor,
+  StripEffectDescriptor,
   Color,
   ColorRGB,
   ColorRGBW,
@@ -60,4 +67,11 @@ export type {
 } from './event-builder.js';
 
 // Re-export the protocol enums so consumers don't need a separate import.
-export { Styles, BlendingModes, GoboTypes, Identifiers } from '../protocol/Identifiers.js';
+export {
+  Styles,
+  StripStyles,
+  BlendingModes,
+  GoboTypes,
+  Identifiers,
+  STRIP_PARAM_COUNT,
+} from '../protocol/Identifiers.js';

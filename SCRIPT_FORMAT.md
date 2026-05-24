@@ -39,8 +39,10 @@ formats** and normalises both to the v2 model below:
 | `start`    | number | Seconds on the media timeline. |
 | `duration` | number | Seconds. The event is live while `start ≤ playhead ≤ start + duration`. |
 | `mask`     | number | Optional routing mask (0–255). Default `0`. |
+| `kind`     | string | `"effect"` (default, omittable) for a regular light event, or `"strip"` for an addressable LED-strip event. |
 | `layer`    | object | See below. |
-| `effect`   | object | See below. |
+| `effect`   | object | Regular events only (`kind` omitted/`"effect"`). See below. |
+| `strip`    | object | Strip events only (`kind: "strip"`). See *Strip event* below. |
 
 ### `layer`
 
@@ -54,11 +56,40 @@ formats** and normalises both to the v2 model below:
 
 | Field       | Type                 | Default | Notes |
 |-------------|----------------------|---------|-------|
-| `style`     | string \| number     | `On`    | Style **name** (`Wave`, `Sparkle`, `Boom`, `Pulse`, `Heartbeat`, `Strobe`…) or its protocol number. Unknown names are rejected — use the number for styles not in the enum (e.g. accelerometer styles `17`, `22`, `25`). |
+| `style`     | string \| number     | `On`    | Style **name** (`Wave`, `Sparkle`, `Boom`, `Heartbeat`, `Strobe`…) or its protocol number. Unknown names fall back to `On` — use a name from the enum, or the number. Accelerometer styles also have names now (`ACC_POSITION_X_PN` = `17`, etc.). |
 | `frequency` | number               | `0`     | 0–255, style-dependent. |
 | `duration`  | number               | `100`   | Effect-duration byte (0–255), style-dependent. |
 | `color`     | `[r,g,b,w,vib]`      | zeros   | Each 0–255. Trailing channels optional: `[255,0,0]` ≡ `[255,0,0,0,0]`. |
 | `intensity` | number \| keyframes  | `255`   | Constant level, or an envelope (below). |
+
+## Strip event (`kind: "strip"`)
+
+Drives the addressable LED strip (WS2812B, 26 LEDs) — protocol object `0x0110`.
+Instead of `effect`, a strip event carries a `strip` object. `start`, `duration`,
+`mask` and `layer` work exactly as for regular events; there is no `intensity`
+envelope (strip params are static).
+
+```json
+{
+  "kind": "strip",
+  "id": "strip-1",
+  "start": 4.0,
+  "duration": 2.0,
+  "layer": { "nbr": 0, "opacity": 255, "blendingMode": "Add" },
+  "strip": { "style": "Comet", "params": [255, 255, 255, 255, 4, 10, 0, 0] }
+}
+```
+
+### `strip`
+
+| Field    | Type             | Default | Notes |
+|----------|------------------|---------|-------|
+| `style`  | string \| number | `Off`   | Strip style **name** (`ColorSweep`, `Comet`, `KittWide`, `PulseBeat`, `RainbowComet`, `Shimmer`, `VuMeter`, `VuMeterPeak`, `Direction`, `DirectionDyn`, `Battery`…) or its number. Unknown names fall back to `Off`. |
+| `params` | number[8]        | zeros   | 8 generic bytes (0–255). **Meaning depends on `style`** — full per-style layout in the firmware doc `wristband_firmware/Doc/strip_effects.md`. The editor labels them per style (R/G/B triplets shown as colour pickers). |
+
+Styles: `Off`(0), `ColorSweep`(1), `Comet`(2), `DoubleSpin`(3), `ImpactWave`(4),
+`KittWide`(5), `PulseBeat`(6), `RainbowComet`(7), `Shimmer`(8), `VuMeter`(9),
+`VuMeterPeak`(10), `Direction`(11), `DirectionDyn`(12), `Battery`(13).
 
 ## Intensity envelope (keyframes)
 

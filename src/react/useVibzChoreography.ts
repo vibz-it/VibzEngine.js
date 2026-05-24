@@ -5,6 +5,7 @@ import {
   buildChoreographyEvent,
   hasIntensityVariation,
   intensityAt,
+  isStripEvent,
   type Choreography,
 } from './choreography.js';
 
@@ -216,8 +217,10 @@ export function useVibzChoreography(
           const refreshMs = varies ? fast : slow;
           if (!forceSend && nowMs - entry.lastSendMs < refreshMs) continue;
 
-          const progress = (t - ev.start) / ev.duration;
-          const intensity = intensityAt(ev.effect.intensity, progress);
+          // Strip events carry no intensity envelope (static params).
+          const intensity = isStripEvent(ev)
+            ? 255
+            : intensityAt(ev.effect.intensity, (t - ev.start) / ev.duration);
           const durationMs = ev.duration * 1000;
           const stopMs = Math.min(
             entry.tstartMs + durationMs,

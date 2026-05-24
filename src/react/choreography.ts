@@ -13,9 +13,9 @@
  *    absence of `version` so existing scripts keep working unconverted.
  */
 
-import { buildEvent } from './event-builder.js';
-import { Event as VibzEvent } from '../protocol/BinaryTypes.js';
-import { Styles, BlendingModes } from '../protocol/Identifiers.js';
+import { buildEvent, buildStripEvent } from './event-builder.js';
+import { Event as VibzEvent, EventStrip } from '../protocol/BinaryTypes.js';
+import { Styles, BlendingModes, StripStyles } from '../protocol/Identifiers.js';
 
 // ---------------------------------------------------------------------------
 // Model
@@ -49,7 +49,15 @@ export interface ChoreographyLayer {
   blendingMode: number;
 }
 
-export interface ChoreographyEvent {
+/** Effect for the addressable LED strip (object 0x0110). */
+export interface ChoreographyStripEffect {
+  /** StripStyles value. */
+  style: number;
+  /** 8 generic params (0–255), meaning depends on `style`. */
+  params: number[];
+}
+
+interface ChoreographyEventBase {
   /** Stable id, used as the controller event key. */
   id: string;
   /** Seconds, on the media timeline. */
@@ -58,7 +66,26 @@ export interface ChoreographyEvent {
   duration: number;
   mask: number;
   layer: ChoreographyLayer;
+}
+
+/** A regular light event (the device's main RGBWV LEDs). */
+export interface ChoreographyEffectEvent extends ChoreographyEventBase {
+  /** Discriminant. Omitted/`'effect'` for regular events. */
+  kind?: 'effect';
   effect: ChoreographyEffect;
+}
+
+/** An addressable LED-strip event (WS2812B). */
+export interface ChoreographyStripEvent extends ChoreographyEventBase {
+  kind: 'strip';
+  strip: ChoreographyStripEffect;
+}
+
+export type ChoreographyEvent = ChoreographyEffectEvent | ChoreographyStripEvent;
+
+/** Narrow a choreography event to the LED-strip variant. */
+export function isStripEvent(e: ChoreographyEvent): e is ChoreographyStripEvent {
+  return e.kind === 'strip';
 }
 
 /**
@@ -160,8 +187,10 @@ function buildNumberIndex(enumObj: Record<string, number>): Map<number, string> 
 }
 const STYLE_BY_NAME = buildNameIndex(Styles as unknown as Record<string, number>);
 const BLEND_BY_NAME = buildNameIndex(BlendingModes as unknown as Record<string, number>);
+const STRIP_STYLE_BY_NAME = buildNameIndex(StripStyles as unknown as Record<string, number>);
 const STYLE_NAME = buildNumberIndex(Styles as unknown as Record<string, number>);
 const BLEND_NAME = buildNumberIndex(BlendingModes as unknown as Record<string, number>);
+const STRIP_STYLE_NAME = buildNumberIndex(StripStyles as unknown as Record<string, number>);
 
 /** Human style name for a protocol number, or the number itself if unnamed. */
 export function styleName(value: number): string | number {
@@ -170,6 +199,10 @@ export function styleName(value: number): string | number {
 /** Human blending-mode name for a protocol number, or the number if unnamed. */
 export function blendingModeName(value: number): string | number {
   return BLEND_NAME.get(value) ?? value;
+}
+/** Human strip-style name for a protocol number, or the number if unnamed. */
+export function stripStyleName(value: number): string | number {
+  return STRIP_STYLE_NAME.get(value) ?? value;
 }
 
 function resolveEnum(
@@ -254,7 +287,7 @@ function legacyEnvelopeToIntensity(e: Record<string, unknown>): Intensity {
 
 /** True when the intensity envelope is not constant (drives faster refresh). */
 export function hasIntensityVariation(event: ChoreographyEvent): boolean {
-  return Array.isArray(event.effect.intensity);
+  return !isStripEvent(event) && Array.isArray(event.effect.intensity);
 }
 
 /** Sample the intensity at `progress` (0…1) within an event. Returns 0–255. */
@@ -281,37 +314,61 @@ export function intensityAt(intensity: Intensity, progress: number): number {
 // Parsing / normalisation
 // ---------------------------------------------------------------------------
 
+function normalizeStripEffect(raw: unknown): ChoreographyStripEffect {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const params = Array.isArray(r.params) ? r.params : [];
+  return {
+    style: resolveEnum(r.style, STRIP_STYLE_BY_NAME, StripStyles.Off),
+    params: Array.from({ length: 8 }, (_, i) => clampByte(params[i], 0)),
+  };
+}
+
 function normalizeEvent(raw: Record<string, unknown>, index: number): ChoreographyEvent {
-  const isLegacy = raw.effect === undefined; // v2 always groups under `effect`
   const layerRaw = (raw.layer as Record<string, unknown>) ?? {};
-  const fxRaw = (isLegacy ? raw : (raw.effect as Record<string, unknown>)) ?? {};
 
   const id =
     raw.id !== undefined && raw.id !== null
       ? String(raw.id)
       : `evt-${index}`;
 
-  const start = Number(isLegacy ? raw.startTime : raw.start) || 0;
-  const duration = Math.max(0.001, Number(raw.duration) || 0);
+  const mask = clampByte(raw.mask, 0);
+  const layer: ChoreographyLayer = {
+    nbr: clampByte(layerRaw.nbr, 0),
+    opacity: clampByte(layerRaw.opacity, 255),
+    blendingMode: resolveEnum(
+      layerRaw.blendingMode ?? layerRaw.blending_mode,
+      BLEND_BY_NAME,
+      BlendingModes.Add
+    ),
+  };
 
+  // Addressable LED-strip event — always v2 (no legacy form).
+  if (raw.kind === 'strip' || raw.strip !== undefined) {
+    return {
+      kind: 'strip',
+      id,
+      start: Number(raw.start) || 0,
+      duration: Math.max(0.001, Number(raw.duration) || 0),
+      mask,
+      layer,
+      strip: normalizeStripEffect(raw.strip ?? raw),
+    };
+  }
+
+  // Regular light event (legacy flat form or grouped v2).
+  const isLegacy = raw.effect === undefined; // v2 always groups under `effect`
+  const fxRaw = (isLegacy ? raw : (raw.effect as Record<string, unknown>)) ?? {};
   const intensity = isLegacy
     ? legacyEnvelopeToIntensity(raw)
     : normalizeIntensity((fxRaw as Record<string, unknown>).intensity, 255);
 
   return {
+    kind: 'effect',
     id,
-    start,
-    duration,
-    mask: clampByte(raw.mask, 0),
-    layer: {
-      nbr: clampByte(layerRaw.nbr, 0),
-      opacity: clampByte(layerRaw.opacity, 255),
-      blendingMode: resolveEnum(
-        layerRaw.blendingMode ?? layerRaw.blending_mode,
-        BLEND_BY_NAME,
-        BlendingModes.Add
-      ),
-    },
+    start: Number(isLegacy ? raw.startTime : raw.start) || 0,
+    duration: Math.max(0.001, Number(raw.duration) || 0),
+    mask,
+    layer,
     effect: {
       style: resolveEnum((fxRaw as Record<string, unknown>).style, STYLE_BY_NAME, Styles.On),
       frequency: clampByte((fxRaw as Record<string, unknown>).frequency, 0),
@@ -374,7 +431,21 @@ export interface BuiltEventTiming {
 export function buildChoreographyEvent(
   event: ChoreographyEvent,
   timing: BuiltEventTiming
-): VibzEvent {
+): VibzEvent | EventStrip {
+  if (isStripEvent(event)) {
+    return buildStripEvent({
+      mask: event.mask,
+      layer: {
+        nbr: event.layer.nbr,
+        opacity: event.layer.opacity,
+        blendingMode: event.layer.blendingMode,
+      },
+      effect: { style: event.strip.style, params: event.strip.params },
+      startTime: timing.startTimeMs,
+      stopTime: timing.stopTimeMs,
+      autoExtend: false,
+    });
+  }
   return buildEvent({
     mask: event.mask,
     layer: {
@@ -411,30 +482,42 @@ export function serializeChoreography(c: Choreography): Record<string, unknown> 
     ...(c.media ? { media: c.media } : {}),
     ...(c.grid ? { grid: c.grid } : {}),
     loop: c.loop,
-    events: c.events.map((e) => ({
-      id: e.id,
-      start: round3(e.start),
-      duration: round3(e.duration),
-      ...(e.mask ? { mask: e.mask } : {}),
-      layer: {
-        nbr: e.layer.nbr,
-        opacity: e.layer.opacity,
-        blendingMode: blendingModeName(e.layer.blendingMode),
-      },
-      effect: {
-        style: styleName(e.effect.style),
-        frequency: e.effect.frequency,
-        duration: e.effect.duration,
-        color: e.effect.color,
-        intensity: Array.isArray(e.effect.intensity)
-          ? e.effect.intensity.map((k) => ({
-              at: round3(k.at),
-              value: k.value,
-              ...(k.easing === 'hold' ? { easing: 'hold' } : {}),
-            }))
-          : e.effect.intensity,
-      },
-    })),
+    events: c.events.map((e) => {
+      const base = {
+        id: e.id,
+        start: round3(e.start),
+        duration: round3(e.duration),
+        ...(e.mask ? { mask: e.mask } : {}),
+        layer: {
+          nbr: e.layer.nbr,
+          opacity: e.layer.opacity,
+          blendingMode: blendingModeName(e.layer.blendingMode),
+        },
+      };
+      if (isStripEvent(e)) {
+        return {
+          ...base,
+          kind: 'strip',
+          strip: { style: stripStyleName(e.strip.style), params: e.strip.params },
+        };
+      }
+      return {
+        ...base,
+        effect: {
+          style: styleName(e.effect.style),
+          frequency: e.effect.frequency,
+          duration: e.effect.duration,
+          color: e.effect.color,
+          intensity: Array.isArray(e.effect.intensity)
+            ? e.effect.intensity.map((k) => ({
+                at: round3(k.at),
+                value: k.value,
+                ...(k.easing === 'hold' ? { easing: 'hold' } : {}),
+              }))
+            : e.effect.intensity,
+        },
+      };
+    }),
   };
 }
 
