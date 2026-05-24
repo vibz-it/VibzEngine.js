@@ -44,6 +44,11 @@ export const STUDIO_CSS = `
   background:#101218;font-size:10px;color:#778;min-width:100%;}
 .vz-ruler .t{position:absolute;top:0;height:100%;border-left:1px solid #23262e;padding-left:4px;}
 .vz-lane{position:relative;border-bottom:1px solid #16181d;}
+.vz-lane.drop{background:rgba(99,102,241,.12);box-shadow:inset 0 0 0 1px rgba(123,131,255,.5);}
+.vz-newlane{position:relative;height:40px;margin-top:2px;display:flex;align-items:center;
+  justify-content:center;color:#7a7f93;font-size:12px;border:1px dashed #34384a;
+  border-radius:6px;background:rgba(255,255,255,.02);}
+.vz-newlane.drop{color:#c3b3ff;border-color:#6b5bd0;background:rgba(99,102,241,.16);}
 .vz-lane-label{position:sticky;left:0;z-index:2;display:inline-block;font-size:10px;
   color:#889;background:#101218cc;padding:2px 8px;border-bottom-right-radius:6px;}
 .vz-ev{position:absolute;top:22px;height:38px;border-radius:6px;overflow:hidden;
@@ -105,8 +110,9 @@ export const STUDIO_CSS = `
 .vz-studio,.vz-studio *{cursor:auto !important;}
 .vz-studio button,.vz-studio select,.vz-studio label,
 .vz-studio input[type=checkbox],.vz-studio input[type=radio],
-.vz-studio input[type=color],.vz-studio input[type=range],
-.vz-studio .vz-ruler,.vz-studio .vz-lane{cursor:pointer !important;}
+.vz-studio input[type=color],.vz-studio input[type=range]{cursor:pointer !important;}
+.vz-studio .vz-ruler,.vz-studio .vz-lane{cursor:grab !important;user-select:none;}
+.vz-studio .vz-ruler:active,.vz-studio .vz-lane:active{cursor:grabbing !important;}
 .vz-studio button:disabled{cursor:not-allowed !important;}
 .vz-studio .vz-ev{cursor:grab !important;}
 .vz-studio .vz-ev .grip{cursor:ew-resize !important;}

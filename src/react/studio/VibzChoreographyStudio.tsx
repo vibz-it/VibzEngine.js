@@ -166,6 +166,23 @@ const snap = (s: number) => Math.round(s * 20) / 20; // 0.05 s grid
 const round3 = (n: number) => Math.round(n * 1000) / 1000; // ms precision for time fields
 const num = (v: string) => Number(v) || 0;
 
+// Timeline lane geometry — RULER_H matches `.vz-ruler` height in styles.ts,
+// LANE_H is applied to each `.vz-lane`. Used to map a pointer Y to a layer row.
+const RULER_H = 24;
+const LANE_H = 64;
+/**
+ * Which layer number sits under viewport `clientY` inside the lanes wrapper.
+ * Below the last lane it returns `max(lanes)+1` — a brand-new layer.
+ */
+function layerAtClientY(clientY: number, wrap: HTMLElement | null, lanes: number[]): number {
+  if (!wrap || lanes.length === 0) return 0;
+  const top = wrap.getBoundingClientRect().top + RULER_H;
+  const idx = Math.floor((clientY - top) / LANE_H);
+  if (idx < 0) return lanes[0];
+  if (idx >= lanes.length) return Math.max(...lanes) + 1; // drop below last → new layer
+  return lanes[idx];
+}
+
 /**
  * True when an [r,g,b,…] block colour is dark enough that black text/strokes
  * would be unreadable — callers flip to a light foreground. Uses perceived
@@ -228,7 +245,8 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   const [dragOver, setDragOver] = useState(false);
 
   const [model, setModel] = useState<Choreography>(emptyModel);
-  const [selId, setSelId] = useState<string | null>(null);
+  // Selection is a list: 1 = editable (EventForm), >1 = multi (copy/move only).
+  const [selIds, setSelIds] = useState<string[]>([]);
   const [pps, setPps] = useState(80);
   const [toast, setToast] = useState<string | null>(null);
   const idSeq = useRef(1);
@@ -547,24 +565,73 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
   const addEvent = useCb(() => {
     const id = `evt-${idSeq.current++}`;
     setModel((m) => ({ ...m, events: [...m.events, newEvent(id, snapTime(now, false))] }));
-    setSelId(id);
+    setSelIds([id]);
   }, [now, snapTime]);
-  const delEvent = useCb((id: string) => {
-    setModel((m) => ({ ...m, events: m.events.filter((e) => e.id !== id) }));
-    setSelId((s) => (s === id ? null : s));
+  const delIds = useCb((ids: string[]) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    setModel((m) => ({ ...m, events: m.events.filter((e) => !set.has(e.id)) }));
+    setSelIds((s) => s.filter((x) => !set.has(x)));
   }, []);
+  const delEvent = useCb((id: string) => delIds([id]), [delIds]);
 
   // ---- timeline drag / resize ---------------------------------------------
   const drag = useRef<{
-    id: string; mode: 'move' | 'l' | 'r'; x0: number; s0: number; d0: number;
+    id: string; mode: 'move' | 'l' | 'r'; x0: number; y0: number; s0: number; d0: number;
+    /** Ctrl/Cmd-drag: snapshot to clone on first real movement (then cleared). */
+    dupSrc?: ChoreographyEvent;
+    /** Multi-selection move: all dragged ids + their initial starts (layers kept). */
+    multi?: Array<{ id: string; s0: number }>;
+    /** Ctrl/Cmd multi-drag: snapshots to clone on first movement (then cleared). */
+    dupMulti?: ChoreographyEvent[];
+    /** Multi-drag: set once real movement happens (a plain click collapses sel). */
+    moved?: boolean;
   } | null>(null);
+  // Live layer row the pointer is over during a move-drag (for highlight + the
+  // "new layer" drop zone); null when not dragging.
+  const [dropLayer, setDropLayer] = useState<number | null>(null);
 
   const onEvPointerDown = useCb(
     (e: RPointerEvent, ev: ChoreographyEvent, mode: 'move' | 'l' | 'r') => {
       e.stopPropagation();
+      // Shift-click toggles the event in the multi-selection — no drag.
+      if (mode === 'move' && e.shiftKey) {
+        setSelIds((s) => (s.includes(ev.id) ? s.filter((x) => x !== ev.id) : [...s, ev.id]));
+        return;
+      }
       (e.target as Element).setPointerCapture?.(e.pointerId);
-      setSelId(ev.id);
-      drag.current = { id: ev.id, mode, x0: e.clientX, s0: ev.start, d0: ev.duration };
+
+      const cur = selRef.current;
+      const dup = mode === 'move' && (e.ctrlKey || e.metaKey);
+
+      // Grabbing a member of a multi-selection drags the whole group together,
+      // horizontally only, keeping each event's layer (Ctrl = duplicate group).
+      if (mode === 'move' && cur.length > 1 && cur.includes(ev.id)) {
+        const evs = cur
+          .map((id) => modelRef.current.events.find((x) => x.id === id))
+          .filter((x): x is ChoreographyEvent => !!x);
+        drag.current = {
+          id: ev.id, mode, x0: e.clientX, y0: e.clientY, s0: ev.start, d0: ev.duration,
+          multi: evs.map((x) => ({ id: x.id, s0: x.start })),
+          dupMulti: dup
+            ? evs.map((x) => JSON.parse(JSON.stringify(x)) as ChoreographyEvent)
+            : undefined,
+        };
+        return;
+      }
+
+      // Single selection + single drag. Ctrl/Cmd-drag duplicates (the copy is
+      // spawned on the first real movement and follows the cursor).
+      setSelIds([ev.id]);
+      drag.current = {
+        id: ev.id,
+        mode,
+        x0: e.clientX,
+        y0: e.clientY,
+        s0: ev.start,
+        d0: ev.duration,
+        dupSrc: dup ? (JSON.parse(JSON.stringify(ev)) as ChoreographyEvent) : undefined,
+      };
     },
     []
   );
@@ -572,6 +639,56 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     (e: RPointerEvent) => {
       const d = drag.current;
       if (!d) return;
+
+      // Multi-selection drag: move the whole group horizontally, keeping each
+      // event's layer. The grabbed event is the snap anchor; the same (clamped)
+      // delta is applied to all so relative spacing is preserved.
+      if (d.multi) {
+        const movedEnough = Math.abs(e.clientX - d.x0) >= 3;
+        if (d.dupMulti) {
+          if (!movedEnough) return; // wait for real movement
+          const srcs = d.dupMulti;
+          const clones = srcs.map((src) => {
+            const c = JSON.parse(JSON.stringify(src)) as ChoreographyEvent;
+            c.id = `evt-p${++pasteSeq}-${idSeq.current++}`;
+            return c;
+          });
+          setModel((m) => ({ ...m, events: [...m.events, ...clones] }));
+          setSelIds(clones.map((c) => c.id));
+          d.multi = clones.map((c, i) => ({ id: c.id, s0: srcs[i].start }));
+          d.dupMulti = undefined;
+          flash(`Copied ${clones.length}`);
+        } else if (!d.moved && !movedEnough) {
+          return; // ignore jitter; a plain click collapses the selection on up
+        }
+        d.moved = true;
+        const items = d.multi;
+        const minS0 = Math.min(...items.map((it) => it.s0));
+        let delta = snapTime(Math.max(0, d.s0 + (e.clientX - d.x0) / pps), e.altKey) - d.s0;
+        if (minS0 + delta < 0) delta = -minS0; // keep the group on the timeline
+        const starts = new Map(items.map((it) => [it.id, Math.max(0, it.s0 + delta)]));
+        setModel((m) => ({
+          ...m,
+          events: m.events.map((ev) =>
+            starts.has(ev.id) ? { ...ev, start: starts.get(ev.id)! } : ev
+          ),
+        }));
+        return;
+      }
+
+      // Ctrl/Cmd-drag: spawn the copy on the first real movement, then drag the
+      // copy (the original is left untouched). Deferred past a 3px threshold so a
+      // plain Ctrl-click doesn't leave a stray duplicate.
+      if (d.dupSrc) {
+        if (Math.abs(e.clientX - d.x0) < 3) return;
+        const clone = d.dupSrc;
+        clone.id = `evt-p${++pasteSeq}-${idSeq.current++}`;
+        setModel((m) => ({ ...m, events: [...m.events, clone] }));
+        setSelIds([clone.id]);
+        d.id = clone.id;
+        d.dupSrc = undefined;
+        flash('Copy');
+      }
       const dt = (e.clientX - d.x0) / pps;
       const alt = e.altKey;
       patch(d.id, (ev) => {
@@ -590,12 +707,56 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
         );
         return { ...ev, start: ns, duration: Math.max(0.1, d.s0 + d.d0 - ns) };
       });
+      // Vertical: highlight the target layer row and lift the block to follow
+      // the cursor (transform/zIndex are set imperatively so React's re-render
+      // for the horizontal `left` change leaves them intact). Found by id so it
+      // also works for the Ctrl-drag clone (the original keeps pointer capture).
+      if (d.mode === 'move') {
+        setDropLayer(layerAtClientY(e.clientY, lanesWrapRef.current, lanesRef.current));
+        const el = lanesWrapRef.current?.querySelector(
+          `[data-evid="${d.id}"]`
+        ) as HTMLElement | null;
+        if (el) {
+          el.style.transform = `translateY(${e.clientY - d.y0}px)`;
+          el.style.zIndex = '6';
+        }
+      }
     },
-    [pps, patch, snapTime]
+    [pps, patch, snapTime, flash]
   );
-  const onEvPointerUp = useCb(() => {
-    drag.current = null;
-  }, []);
+  const onEvPointerUp = useCb(
+    (e: RPointerEvent) => {
+      const d = drag.current;
+      drag.current = null;
+      // Plain click (no drag) on a member of a multi-selection collapses it to
+      // just that event.
+      if (d && d.multi && !d.moved) {
+        setSelIds([d.id]);
+        setDropLayer(null);
+        return;
+      }
+      // Single move only: drop on a different layer row (or below the last lane
+      // → a new layer) re-assigns the layer. Committed on release to avoid
+      // re-parenting the dragged element mid-drag (drops the pointer capture).
+      // Multi-drags keep their layers, so they're excluded.
+      if (d && d.mode === 'move' && !d.multi) {
+        // Clear the imperative lift; React owns the resting position from here.
+        const el = lanesWrapRef.current?.querySelector(
+          `[data-evid="${d.id}"]`
+        ) as HTMLElement | null;
+        if (el) {
+          el.style.transform = '';
+          el.style.zIndex = '';
+        }
+        const target = layerAtClientY(e.clientY, lanesWrapRef.current, lanesRef.current);
+        patch(d.id, (ev) =>
+          ev.layer.nbr === target ? ev : { ...ev, layer: { ...ev.layer, nbr: target } }
+        );
+      }
+      setDropLayer(null);
+    },
+    [patch]
+  );
 
   const seek = useCb(
     (clientX: number) => {
@@ -608,6 +769,36 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     },
     [pps, duration]
   );
+
+  // ---- pan: click-and-hold the ruler / empty lane to scroll the view ---------
+  // Drag-to-pan ("hand tool") on the timeline background: moving the pointer
+  // scrolls the horizontal view. A press without real movement falls through to
+  // a seek on release, so a plain click still places the playhead.
+  const pan = useRef<{ x0: number; left0: number; moved: boolean } | null>(null);
+  const onPanDown = useCb((e: RPointerEvent) => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    pan.current = { x0: e.clientX, left0: sc.scrollLeft, moved: false };
+  }, []);
+  const onPanMove = useCb((e: RPointerEvent) => {
+    const p = pan.current;
+    const sc = scrollRef.current;
+    if (!p || !sc) return;
+    const dx = e.clientX - p.x0;
+    if (!p.moved && Math.abs(dx) < 3) return; // ignore tiny jitter (keep click)
+    p.moved = true;
+    sc.scrollLeft = p.left0 - dx; // grab: content follows the pointer
+  }, []);
+  const onPanUp = useCb((e: RPointerEvent) => {
+    const p = pan.current;
+    pan.current = null;
+    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
+    if (p && !p.moved) {
+      seek(e.clientX); // no drag → treat as a click-to-seek
+      setSelIds([]); // …and clear the selection (click on empty timeline)
+    }
+  }, [seek]);
 
   // ---- import / export -----------------------------------------------------
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -622,7 +813,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           );
           idSeq.current = maxN + 1;
           setModel(m);
-          setSelId(null);
+          setSelIds([]);
           applyMediaFromModel(m);
           applyGridFromModel(m);
           markCleanWith(m);
@@ -657,53 +848,74 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     const set = new Set(model.events.map((e) => e.layer.nbr));
     return [...set].sort((a, b) => a - b);
   }, [model.events]);
+  // Live mirrors so the (stable) drag handlers read current lanes + wrapper geom.
+  const lanesRef = useRef(lanes);
+  lanesRef.current = lanes;
+  const lanesWrapRef = useRef<HTMLDivElement | null>(null);
+  const newLayerNum = lanes.length ? Math.max(...lanes) + 1 : 0;
 
-  const sel = model.events.find((e) => e.id === selId) || null;
+  const selSet = new Set(selIds);
+  // Editable only when exactly one event is selected.
+  const sel = selIds.length === 1 ? model.events.find((e) => e.id === selIds[0]) || null : null;
 
   // ---- clipboard / context menu / shortcuts --------------------------------
   const modelRef = useRef(model);
   modelRef.current = model;
-  const selRef = useRef(selId);
-  selRef.current = selId;
-  const clip = useRef<ChoreographyEvent | null>(null);
+  const selRef = useRef(selIds);
+  selRef.current = selIds;
+  const clip = useRef<ChoreographyEvent[]>([]);
   const [menu, setMenu] = useState<
     { x: number; y: number; evId?: string; time?: number; layer?: number } | null
   >(null);
 
-  const copyEv = useCb(
-    (id: string) => {
-      const e = modelRef.current.events.find((x) => x.id === id);
-      if (!e) return;
-      clip.current = JSON.parse(JSON.stringify(e)) as ChoreographyEvent;
-      flash('Event copied');
+  const copyIds = useCb(
+    (ids: string[]) => {
+      const evs = ids
+        .map((id) => modelRef.current.events.find((x) => x.id === id))
+        .filter((x): x is ChoreographyEvent => !!x);
+      if (!evs.length) return;
+      clip.current = JSON.parse(JSON.stringify(evs)) as ChoreographyEvent[];
+      flash(evs.length > 1 ? `Copied ${evs.length} events` : 'Event copied');
     },
     [flash]
   );
   const pasteAt = useCb(
     (time: number, layer?: number) => {
-      const c = clip.current;
-      if (!c) return;
-      const id = `evt-p${++pasteSeq}-${idSeq.current++}`;
-      const ev: ChoreographyEvent = {
-        ...(JSON.parse(JSON.stringify(c)) as ChoreographyEvent),
-        id,
-        start: snapTime(Math.max(0, time), false),
-        layer: { ...c.layer, nbr: layer ?? c.layer.nbr },
-      };
-      setModel((m) => ({ ...m, events: [...m.events, ev] }));
-      setSelId(id);
-      flash('Pasted');
+      const cs = clip.current;
+      if (!cs.length) return;
+      const minStart = Math.min(...cs.map((c) => c.start));
+      const base = snapTime(Math.max(0, time), false);
+      const single = cs.length === 1;
+      const ids: string[] = [];
+      const clones = cs.map((c) => {
+        const id = `evt-p${++pasteSeq}-${idSeq.current++}`;
+        ids.push(id);
+        const nc = JSON.parse(JSON.stringify(c)) as ChoreographyEvent;
+        nc.id = id;
+        nc.start = Math.max(0, base + (c.start - minStart)); // keep relative timing
+        // A single paste may retarget the layer ("paste here" on a lane); a
+        // multi-paste keeps each event's own layer.
+        if (single && layer !== undefined) nc.layer = { ...nc.layer, nbr: layer };
+        return nc;
+      });
+      setModel((m) => ({ ...m, events: [...m.events, ...clones] }));
+      setSelIds(ids);
+      flash(single ? 'Pasted' : `Pasted ${clones.length}`);
     },
     [flash, snapTime]
   );
   const duplicateEv = useCb(
     (id: string) => {
-      const e = modelRef.current.events.find((x) => x.id === id);
-      if (!e) return;
-      copyEv(id);
-      pasteAt(e.start + e.duration, e.layer.nbr);
+      const ids =
+        selRef.current.length > 1 && selRef.current.includes(id) ? selRef.current : [id];
+      const evs = ids
+        .map((i) => modelRef.current.events.find((x) => x.id === i))
+        .filter((x): x is ChoreographyEvent => !!x);
+      if (!evs.length) return;
+      copyIds(ids);
+      pasteAt(Math.max(...evs.map((e) => e.start + e.duration))); // just after the group
     },
-    [copyEv, pasteAt]
+    [copyIds, pasteAt]
   );
 
   useEffect(() => {
@@ -712,9 +924,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
       if (tg && /^(INPUT|SELECT|TEXTAREA)$/.test(tg.tagName)) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'c') {
-        if (selRef.current) {
+        if (selRef.current.length) {
           e.preventDefault();
-          copyEv(selRef.current);
+          copyIds(selRef.current);
         }
       } else if (mod && e.key.toLowerCase() === 'v') {
         e.preventDefault();
@@ -724,9 +936,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
             : videoRef.current?.currentTime ?? 0;
         pasteAt(t);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selRef.current) {
+        if (selRef.current.length) {
           e.preventDefault();
-          delEvent(selRef.current);
+          delIds(selRef.current);
         }
       } else if (e.key === ' ') {
         e.preventDefault();
@@ -745,7 +957,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [copyEv, pasteAt, delEvent]);
+  }, [copyIds, pasteAt, delIds]);
 
   useEffect(() => {
     if (!menu) return;
@@ -1076,7 +1288,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
             ref={scrollRef}
             onScroll={(e) => setView({ x: e.currentTarget.scrollLeft, w: e.currentTarget.clientWidth })}
           >
-            <div style={{ position: 'relative', width: trackW }}>
+            <div ref={lanesWrapRef} style={{ position: 'relative', width: trackW }}>
               {gridEnabled && gBpm > 0 && (
                 <div className="vz-grid" aria-hidden="true">
                   {gridLines.map((l, i) => (
@@ -1087,7 +1299,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
               <div
                 className="vz-ruler"
                 style={{ width: trackW }}
-                onPointerDown={(e) => seek(e.clientX)}
+                onPointerDown={onPanDown}
+                onPointerMove={onPanMove}
+                onPointerUp={onPanUp}
               >
                 {Array.from({ length: Math.ceil(duration) + 1 }).map((_, s) =>
                   s % (pps < 30 ? 5 : 1) === 0 ? (
@@ -1107,11 +1321,13 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
               {(lanes.length ? lanes : [0]).map((ln) => (
                 <div
                   key={ln}
-                  className="vz-lane"
-                  style={{ height: 64 }}
+                  className={`vz-lane${dropLayer === ln ? ' drop' : ''}`}
+                  style={{ height: LANE_H }}
                   onPointerDown={(e) => {
-                    if (e.target === e.currentTarget) seek(e.clientX);
+                    if (e.target === e.currentTarget) onPanDown(e);
                   }}
+                  onPointerMove={onPanMove}
+                  onPointerUp={onPanUp}
                   onContextMenu={(e) => {
                     if (e.target !== e.currentTarget) return;
                     e.preventDefault();
@@ -1144,7 +1360,8 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                       return (
                         <div
                           key={ev.id}
-                          className={`vz-ev ${ev.id === selId ? 'sel' : ''}`}
+                          data-evid={ev.id}
+                          className={`vz-ev ${selSet.has(ev.id) ? 'sel' : ''}`}
                           style={{
                             left: ev.start * pps,
                             width: w,
@@ -1158,7 +1375,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                           onContextMenu={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            setSelId(ev.id);
+                            // Keep a multi-selection if right-clicking a member;
+                            // otherwise select just this event.
+                            setSelIds((s) => (s.includes(ev.id) ? s : [ev.id]));
                             setMenu({ x: e.clientX, y: e.clientY, evId: ev.id });
                           }}
                           onDoubleClick={(e) => {
@@ -1204,9 +1423,20 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                 </div>
               ))}
 
+              {/* Drop zone shown during a move-drag: release here to put the
+                  event on a brand-new layer below the last one. */}
+              {dropLayer !== null && (
+                <div
+                  className={`vz-newlane${dropLayer === newLayerNum ? ' drop' : ''}`}
+                  style={{ width: trackW }}
+                >
+                  ＋ new layer {newLayerNum}
+                </div>
+              )}
+
               <div
                 className="vz-playhead"
-                style={{ left: now * pps, height: 24 + 64 * (lanes.length || 1) }}
+                style={{ left: now * pps, height: RULER_H + LANE_H * (lanes.length || 1) }}
               />
             </div>
           </div>
@@ -1219,11 +1449,27 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
             onChange={(fn) => patch(sel.id, fn)}
             onDelete={() => delEvent(sel.id)}
           />
+        ) : selIds.length > 1 ? (
+          <div className="vz-right empty">
+            <div>
+              <p>{selIds.length} events selected</p>
+              <p className="vz-hint">
+                Editing is disabled for a multi-selection. Copy/paste (Ctrl+C / Ctrl+V) and
+                drag keep each event on its current layer.
+              </p>
+              <div className="vz-row" style={{ justifyContent: 'center', gap: 8, marginTop: 10 }}>
+                <button onClick={() => copyIds(selIds)}>Copy</button>
+                <button className="danger" onClick={() => delIds(selIds)}>Delete</button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="vz-right empty">
             <div>
               <p>No event selected.</p>
-              <p className="vz-hint">Add an event or click a block on the timeline.</p>
+              <p className="vz-hint">
+                Add an event, click a block, or Shift-click to select several.
+              </p>
             </div>
           </div>
         )}
@@ -1236,26 +1482,33 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           onPointerDown={(e) => e.stopPropagation()}
         >
           {menu.evId ? (
-            <>
-              <div onClick={() => { copyEv(menu.evId!); setMenu(null); }}>
-                Copy <span style={{ color: '#778' }}>Ctrl+C</span>
-              </div>
-              <div onClick={() => { duplicateEv(menu.evId!); setMenu(null); }}>
-                Duplicate
-              </div>
-              <div className="sep" />
-              <div onClick={() => { delEvent(menu.evId!); setMenu(null); }}>
-                Delete <span style={{ color: '#778' }}>Del</span>
-              </div>
-            </>
-          ) : clip.current ? (
+            (() => {
+              const ids =
+                selIds.includes(menu.evId) && selIds.length > 1 ? selIds : [menu.evId];
+              const n = ids.length;
+              return (
+                <>
+                  <div onClick={() => { copyIds(ids); setMenu(null); }}>
+                    {n > 1 ? `Copy ${n}` : 'Copy'} <span style={{ color: '#778' }}>Ctrl+C</span>
+                  </div>
+                  <div onClick={() => { duplicateEv(menu.evId!); setMenu(null); }}>
+                    {n > 1 ? `Duplicate ${n}` : 'Duplicate'}
+                  </div>
+                  <div className="sep" />
+                  <div onClick={() => { delIds(ids); setMenu(null); }}>
+                    {n > 1 ? `Delete ${n}` : 'Delete'} <span style={{ color: '#778' }}>Del</span>
+                  </div>
+                </>
+              );
+            })()
+          ) : clip.current.length ? (
             <div
               onClick={() => {
                 pasteAt(menu.time ?? 0, menu.layer);
                 setMenu(null);
               }}
             >
-              Paste here
+              {clip.current.length > 1 ? `Paste ${clip.current.length}` : 'Paste here'}
               {menu.time != null ? ` @ ${menu.time.toFixed(2)}s` : ''}
             </div>
           ) : (
