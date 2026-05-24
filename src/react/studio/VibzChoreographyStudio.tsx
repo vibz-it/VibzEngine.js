@@ -168,6 +168,37 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     }
   }, [spotifyUri, flash]);
 
+  // ---- unsaved-changes guard -----------------------------------------------
+  // "Saved" == exported to a .json (or freshly opened/imported). We keep a
+  // snapshot of the clean serialized model and flag the studio dirty when it
+  // diverges, then warn before the tab unloads or the overlay is closed.
+  const cleanRef = useRef<string>(JSON.stringify(serializeChoreography(emptyModel())));
+  const currentSnapshot = useMemo(
+    () => JSON.stringify(serializeChoreography(model)),
+    [model]
+  );
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    setDirty(currentSnapshot !== cleanRef.current);
+  }, [currentSnapshot]);
+  const markCleanWith = useCb((m: Choreography) => {
+    cleanRef.current = JSON.stringify(serializeChoreography(m));
+    setDirty(false);
+  }, []);
+
+  // Native "leave site?" prompt on refresh / tab close / navigation.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
   // ---- optional initial script ---------------------------------------------
   useEffect(() => {
     const s = props.initialScript;
@@ -177,6 +208,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
         const m = normalizeScript(raw);
         setModel(m);
         applyMediaFromModel(m);
+        markCleanWith(m);
       } catch (e) {
         flash(`Import failed: ${(e as Error).message}`);
       }
@@ -186,7 +218,7 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     } else {
       load(s);
     }
-  }, [props.initialScript, flash, applyMediaFromModel]);
+  }, [props.initialScript, flash, applyMediaFromModel, markCleanWith]);
 
   // ---- live preview (reuses the shipped sync engine) -----------------------
   const previewScript = useMemo(() => model, [model]);
@@ -314,13 +346,14 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           setModel(m);
           setSelId(null);
           applyMediaFromModel(m);
+          markCleanWith(m);
           flash(`Imported ${m.events.length} events`);
         } catch (e) {
           flash(`Import failed: ${(e as Error).message}`);
         }
       });
     },
-    [flash, applyMediaFromModel]
+    [flash, applyMediaFromModel, markCleanWith]
   );
   const exportJson = useCb(() => {
     const json = JSON.stringify(serializeChoreography(model), null, 2);
@@ -330,8 +363,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
     a.download = `${(model.name || 'choreography').replace(/\s+/g, '-').toLowerCase()}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
+    markCleanWith(model);
     flash('Exported .json — drop it in public/scripts/');
-  }, [model, flash]);
+  }, [model, flash, markCleanWith]);
   const copyJson = useCb(() => {
     const json = JSON.stringify(serializeChoreography(model), null, 2);
     navigator.clipboard?.writeText(json).then(
@@ -473,7 +507,28 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
           value={model.name ?? ''}
           onChange={(e) => setModel((m) => ({ ...m, name: e.target.value }))}
         />
-        <button onClick={props.onClose}>✕ Close</button>
+        {dirty && (
+          <span
+            className="vz-pill off"
+            title="Des modifications ne sont pas exportées"
+          >
+            ● Unsaved
+          </span>
+        )}
+        <button
+          onClick={() => {
+            if (
+              !dirtyRef.current ||
+              window.confirm(
+                'Your changes are not exported and will be lost. Close the studio anyway?'
+              )
+            ) {
+              props.onClose?.();
+            }
+          }}
+        >
+          ✕ Close
+        </button>
       </div>
 
       <div className="vz-body">
@@ -655,7 +710,9 @@ export function VibzChoreographyStudio(props: VibzChoreographyStudioProps) {
                 e.target.value = '';
               }}
             />
-            <button onClick={exportJson}>Export JSON</button>
+            <button className={dirty ? 'primary' : ''} onClick={exportJson}>
+              Export JSON{dirty ? ' ●' : ''}
+            </button>
             <button onClick={copyJson}>Copy JSON</button>
             <div className="grow" />
             <button onClick={() => setPps((p) => clampN(p * 0.8, 10, 400))}>－</button>
