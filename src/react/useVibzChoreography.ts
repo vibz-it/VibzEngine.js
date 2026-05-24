@@ -31,6 +31,14 @@ export interface UseVibzChoreographyOptions {
   fastRefreshMs?: number;
   /** Refresh cadence for constant-intensity events (ms). Default 250. */
   slowRefreshMs?: number;
+  /**
+   * Pre-roll lead time (ms): start sending an event's packet this long *before*
+   * its start time. The device schedules on the synced clock (the `startTimeMs`
+   * sent is its true, still-future start), so pre-rolling guarantees the packet
+   * is already on the device and the effect fires exactly on time despite
+   * transport latency. Default 250.
+   */
+  preRollMs?: number;
 }
 
 export interface UseVibzChoreographyReturn {
@@ -54,10 +62,12 @@ interface TrackEntry {
 
 /**
  * Drives a Vibz light script in lock-step with a media element. While
- * `enabled` and connected, it follows `media.currentTime`: events fire when
- * the playhead is inside their window, each event's device start time is held
- * stable (recomputed only on pause/seek so phase-based styles stay aligned),
- * and intensity envelopes are sampled host-side and re-sent at ~20 Hz.
+ * `enabled` and connected, it follows `media.currentTime`: each event's packet
+ * is sent repeatedly from `preRollMs` before its start until its end, the device
+ * start time is held stable (recomputed only on pause/seek so phase-based styles
+ * stay aligned), the stop time is clamped to `now + watchdogMs` (so the device
+ * self-stops shortly after playback halts), and intensity envelopes are sampled
+ * host-side and re-sent at ~20 Hz.
  *
  * Headless: no DOM, no rendering. Bind `enabled` to a hover/visibility state
  * and pass a `<video>` ref.
@@ -81,6 +91,7 @@ export function useVibzChoreography(
     watchdogMs = 1000,
     fastRefreshMs = 50,
     slowRefreshMs = 250,
+    preRollMs = 250,
   } = options;
 
   const [choreo, setChoreo] = useState<Choreography | null>(null);
@@ -126,8 +137,8 @@ export function useVibzChoreography(
   // effect doesn't re-subscribe every frame.
   const choreoRef = useRef(choreo);
   choreoRef.current = choreo;
-  const optsRef = useRef({ watchdogMs, fastRefreshMs, slowRefreshMs });
-  optsRef.current = { watchdogMs, fastRefreshMs, slowRefreshMs };
+  const optsRef = useRef({ watchdogMs, fastRefreshMs, slowRefreshMs, preRollMs });
+  optsRef.current = { watchdogMs, fastRefreshMs, slowRefreshMs, preRollMs };
 
   useEffect(() => {
     if (!playing) return;
@@ -149,8 +160,9 @@ export function useVibzChoreography(
       const m = mediaEl.current;
       const cho = choreoRef.current;
       if (m && cho) {
-        const { watchdogMs: wd, fastRefreshMs: fast, slowRefreshMs: slow } =
+        const { watchdogMs: wd, fastRefreshMs: fast, slowRefreshMs: slow, preRollMs: preMs } =
           optsRef.current;
+        const preRoll = preMs / 1000;
         const t = m.currentTime;
         const nowMs = Date.now();
         const relNowMs = nowMs - controller.referenceTime;
@@ -168,8 +180,11 @@ export function useVibzChoreography(
         }
         lastTime = t;
 
+        // Active = inside the event window OR within the pre-roll lead before it.
+        // During pre-roll `t < e.start`, so `elapsedMs` below is negative and the
+        // computed `startTimeMs` is the event's true (future) start on the device.
         const active = cho.events.filter(
-          (e) => t >= e.start && t <= e.start + e.duration
+          (e) => t >= e.start - preRoll && t <= e.start + e.duration
         );
         const activeIds = new Set(active.map((e) => e.id));
 
