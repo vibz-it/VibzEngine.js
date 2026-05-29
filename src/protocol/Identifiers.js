@@ -99,7 +99,8 @@ export const StripStyles = {
     VuMeterPeak: 10,
     Direction: 11,
     DirectionDyn: 12,
-    Battery: 13
+    Battery: 13,
+    Compass: 14
 };
 
 /** Number of generic uint8 params carried by an `EffectStrip` (style-dependent). */
