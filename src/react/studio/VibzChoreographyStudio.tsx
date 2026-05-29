@@ -154,6 +154,17 @@ const STRIP_PARAM_SPECS: Record<number, StripParamSpec[]> = {
     { kind: 'num', label: 'Intensity', idx: 0 },
     { kind: 'num', label: 'Battery level', idx: 1 },
   ],
+  // params: [0]=R [1]=G [2]=B [3]=intensity [4]=direction(0=N,64=E,128=S,192=W)
+  //         [5]=style(0=Single,1=Beam,2=Arc,3=Halo,4=BiPolar)
+  //         [6]=width(Beam:beam_w, Arc:half_w) [7]=secondary(Halo:ambient, BiPolar:opposite intensity)
+  [StripStyles.Compass]: [
+    { kind: 'color', label: 'Color', idx: [0, 1, 2] as const },
+    { kind: 'num', label: 'Intensity', idx: 3 },
+    { kind: 'num', label: 'World direction 0–255→0–360° (0=N 64=E 128=S 192=W)', idx: 4 },
+    { kind: 'num', label: 'Style (0=Single 1=Beam 2=Arc 3=Halo 4=BiPolar)', idx: 5 },
+    { kind: 'num', label: 'Width (Beam/Arc)', idx: 6 },
+    { kind: 'num', label: 'Secondary (Halo:ambient / BiPolar:opposite)', idx: 7 },
+  ],
 };
 
 const fmtTime = (s: number) => {

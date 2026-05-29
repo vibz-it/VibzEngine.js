@@ -76,6 +76,7 @@ export const StripStyles: {
   readonly Direction: 11;
   readonly DirectionDyn: 12;
   readonly Battery: 13;
+  readonly Compass: 14;
 };
 
 export const STRIP_PARAM_COUNT: number;
